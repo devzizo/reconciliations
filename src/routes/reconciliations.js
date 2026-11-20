@@ -4,6 +4,7 @@ import { requireRole } from '../auth.js';
 import { loadReconciliation } from '../access.js';
 import { HttpError } from '../errors.js';
 import { formatSar } from '../services/denominations.js';
+import { parseAmountToHalalas } from '../services/amounts.js';
 
 // Declared figures per stage. Amounts are entered in SAR with up to 2 decimals and stored in halalas.
 export const STAGE_FIELDS = {
@@ -13,13 +14,10 @@ export const STAGE_FIELDS = {
   bank_settlement: ['mada_total', 'visa_total', 'mastercard_total', 'transaction_count'],
 };
 
-function toHalalas(value, field) {
-  if (value === null || value === undefined || value === '') return null;
-  const s = String(value).trim();
-  if (!/^-?\d{1,9}(\.\d{1,2})?$/.test(s)) throw new HttpError(400, 'INVALID_AMOUNT', `${field} must be a number with up to 2 decimals.`);
-  const [whole, frac = ''] = s.replace('-', '').split('.');
-  const v = Number(whole) * 100 + Number(frac.padEnd(2, '0'));
-  return s.startsWith('-') ? -v : v;
+function amountField(value, field) {
+  const v = parseAmountToHalalas(value);
+  if (v === undefined) throw new HttpError(400, 'INVALID_AMOUNT', `${field} must be a number with up to 2 decimals.`);
+  return v;
 }
 
 export function reconciliationRoutes({ db, audit }) {
@@ -60,12 +58,21 @@ export function reconciliationRoutes({ db, audit }) {
     for (const f of fields) {
       data[f] = f === 'transaction_count'
         ? (req.body?.[f] === undefined || req.body[f] === '' ? null : Number.parseInt(req.body[f], 10))
-        : toHalalas(req.body?.[f], f);
+        : amountField(req.body?.[f], f);
     }
     await db.run(`INSERT INTO stage_figures (reconciliation_id, stage, data_json, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT (reconciliation_id, stage) DO UPDATE SET data_json = excluded.data_json, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
     rec.id, req.params.stage, JSON.stringify(data), req.user.id, new Date().toISOString());
-    await audit.record({ req, action: 'stage.figures_saved', reconciliationId: rec.id, entityType: 'stage', entityId: req.params.stage, details: data });
+    // When the figures were pre-filled from an AI reading, record what the employee changed.
+    let fromExtraction = null;
+    if (req.body?.extractionId) {
+      const ex = await db.get('SELECT * FROM document_extractions WHERE id = ? AND reconciliation_id = ? AND doc_type = ?', String(req.body.extractionId), rec.id, req.params.stage);
+      if (ex) {
+        const read = JSON.parse(ex.fields_json);
+        fromExtraction = { extractionId: ex.id, adjustments: fields.filter((f) => f in read && read[f] !== data[f]).map((f) => ({ field: f, ai: read[f], saved: data[f] })) };
+      }
+    }
+    await audit.record({ req, action: 'stage.figures_saved', reconciliationId: rec.id, entityType: 'stage', entityId: req.params.stage, details: { figures: data, fromExtraction } });
     res.json(await detail(db, rec));
   });
 

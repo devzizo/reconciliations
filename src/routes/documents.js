@@ -19,7 +19,7 @@ const ALLOWED_MIME = new Map([
   ['image/heif', (b) => b.subarray(4, 8).toString('latin1') === 'ftyp'],
 ]);
 
-export function documentRoutes({ db, audit, config, files }) {
+export function documentRoutes({ db, audit, config, files, documentReader }) {
   const r = express.Router({ mergeParams: true });
   // Multipart is parsed with the standard Web API (Response.formData), which works in Node and Workers.
   const rawMultipart = express.raw({ type: 'multipart/form-data', limit: config.documentMaxBytes + 64 * 1024 });
@@ -63,6 +63,24 @@ export function documentRoutes({ db, audit, config, files }) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, rec.id, req.docType, String(file.name ?? '').slice(0, 200), mime, buf.length, sha256, key, req.user.id, new Date().toISOString());
     await audit.record({ req, action: 'document.uploaded', reconciliationId: rec.id, entityType: 'document', entityId: id, details: { docType: req.docType, mimeType: mime, size: buf.length, sha256 } });
     res.status(201).json({ documentId: id, ...(await detail(db, rec)) });
+  });
+
+  // Read the figures from an uploaded document with AI. Nothing is saved to the stage: the client
+  // pre-fills the form and the employee checks and saves (PUT /stages/:stage with extractionId).
+  r.post('/:docId/extract', async (req, res) => {
+    const rec = await loadReconciliation(db, req.params.id, req.user, { write: true });
+    const doc = await db.get('SELECT * FROM documents WHERE id = ? AND reconciliation_id = ?', req.params.docId, rec.id);
+    if (!doc) throw new HttpError(404, 'NOT_FOUND', 'Document not found.');
+    const result = await documentReader.read({ docType: doc.doc_type, mimeType: doc.mime_type, bytes: await files.get(doc.storage_path) });
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    await db.run(`INSERT INTO document_extractions (id, document_id, reconciliation_id, doc_type, provider, model, status, fields_json, low_confidence_json, issues_json, requested_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, doc.id, rec.id, doc.doc_type, documentReader.provider ?? 'custom', result.model ?? null, result.status,
+    JSON.stringify(result.fields ?? {}), JSON.stringify(result.lowConfidence ?? []), JSON.stringify(result.issues ?? []), req.user.id, now);
+    await audit.record({ req, action: 'document.ai_read', reconciliationId: rec.id, entityType: 'document_extraction', entityId: id,
+      details: { documentId: doc.id, docType: doc.doc_type, provider: documentReader.provider, model: result.model, status: result.status, fields: result.fields } });
+    res.json({ extraction: { extractionId: id, documentId: doc.id, docType: doc.doc_type, status: result.status, model: result.model ?? null,
+      fields: result.fields ?? {}, lowConfidence: result.lowConfidence ?? [], issues: result.issues ?? [], createdAt: now } });
   });
 
   r.get('/:docId', async (req, res) => {

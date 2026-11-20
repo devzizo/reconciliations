@@ -3,6 +3,7 @@ import { openCashCount } from './cash-camera.js';
 
 const root = document.getElementById('app');
 let me = null;
+const suggestions = new Map(); // `${reconciliationId}:${stage}` → AI extraction awaiting review
 
 window.addEventListener('auth-expired', () => { me = null; renderLogin('Your session expired. Sign in again.'); });
 
@@ -117,33 +118,70 @@ async function renderReconciliation(id) {
 
   const docStage = (s) => {
     const st = stages[s.key];
+    // AI reading waiting for review (pre-fills the form; nothing is saved until the employee presses Save).
+    const sug = suggestions.get(`${id}:${s.key}`);
+    const fmt = (f, v) => (v === null || v === undefined ? '' : (f === 'transaction_count' ? String(v) : formatSar(v)));
     const inputs = s.fields.map(([f, label]) => {
-      const v = st.figures?.[f];
-      const input = h('input', { name: f, inputmode: 'decimal', disabled: !editable,
-        value: v === null || v === undefined ? '' : (f === 'transaction_count' ? String(v) : formatSar(v)) });
-      return h('label', { class: 'field' }, label, input);
+      const suggested = sug && sug.status === 'completed' && f in sug.fields;
+      const value = suggested ? fmt(f, sug.fields[f]) : fmt(f, st.figures?.[f]);
+      const low = suggested && sug.lowConfidence.includes(f);
+      const input = h('input', { name: f, inputmode: 'decimal', disabled: !editable, value,
+        class: suggested ? (low ? 'suggested low' : 'suggested') : null, title: low ? 'Hard to read — check this one carefully' : null });
+      return h('label', { class: 'field' }, low ? `${label} ⚠` : label, input);
     });
-    const figForm = h('form', { class: 'grid' }, ...inputs, editable ? h('button', { class: 'btn', type: 'submit' }, 'Save figures') : null);
+    const figForm = h('form', { class: 'grid' }, ...inputs, editable ? h('button', { class: 'btn primary', type: 'submit' }, sug ? 'Checked — save figures' : 'Save figures') : null);
     figForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const body = Object.fromEntries(new FormData(figForm).entries());
-      try { await api(`/reconciliations/${id}/stages/${s.key}`, { method: 'PUT', body }); toast('Saved.', 'ok'); renderReconciliation(id); }
-      catch (err) { toast(err.message, 'error'); }
+      if (sug?.extractionId) body.extractionId = sug.extractionId;
+      try {
+        await api(`/reconciliations/${id}/stages/${s.key}`, { method: 'PUT', body });
+        suggestions.delete(`${id}:${s.key}`);
+        toast('Saved.', 'ok'); renderReconciliation(id);
+      } catch (err) { toast(err.message, 'error'); }
     });
+
+    const readDocument = async (docId) => {
+      toast('Reading the numbers from the document… · جاري قراءة الأرقام', 'info');
+      try {
+        const { extraction } = await api(`/reconciliations/${id}/documents/${docId}/extract`, { method: 'POST' });
+        suggestions.set(`${id}:${s.key}`, extraction);
+        if (extraction.status === 'completed') toast('Numbers filled in. Check each one against the document, then save.', 'ok');
+        else toast(extraction.issues[0] ?? 'Could not read the document. Enter the figures by hand.', 'warn');
+      } catch (err) { toast(err.message, 'error'); }
+      renderReconciliation(id);
+    };
+
     // Stages 1-3 accept ordinary PDF / image uploads (this is NOT the cash-count stage).
     const file = h('input', { type: 'file', accept: 'application/pdf,image/jpeg,image/png,image/webp,image/heic', disabled: !editable });
     file.addEventListener('change', async () => {
       if (!file.files[0]) return;
       const fd = new FormData();
       fd.append('file', file.files[0]);
-      try { await api(`/reconciliations/${id}/documents?type=${s.key}`, { method: 'POST', formData: fd }); toast('Uploaded.', 'ok'); renderReconciliation(id); }
-      catch (err) { toast(err.message, 'error'); }
+      let uploaded;
+      try { uploaded = await api(`/reconciliations/${id}/documents?type=${s.key}`, { method: 'POST', formData: fd }); toast('Uploaded.', 'ok'); }
+      catch (err) { toast(err.message, 'error'); return; }
+      if (me.features.aiReading) return readDocument(uploaded.documentId);
+      renderReconciliation(id);
     });
+
+    const canRead = editable && me.features.aiReading;
+    const reviewNote = sug ? h('div', { class: `note ${sug.status === 'completed' ? '' : 'warn'}` },
+      sug.status === 'completed'
+        ? h('p', {}, 'The highlighted numbers were read by AI from the document. Compare each one with the document, correct anything wrong, then save. ⚠ marks values that were hard to read. · راجع الأرقام قبل الحفظ')
+        : h('p', {}, 'The document could not be read automatically. Enter the figures by hand.'),
+      sug.issues.length ? h('ul', { class: 'issues' }, ...sug.issues.map((i) => h('li', {}, i))) : null,
+      h('button', { class: 'btn ghost small', type: 'button', onclick: () => { suggestions.delete(`${id}:${s.key}`); renderReconciliation(id); } }, 'Discard AI values')) : null;
+
     return h('section', { class: `card stage ${st.complete ? 'done' : ''}` },
       h('h3', {}, `${s.n}. ${s.title} `, h('span', { class: 'muted', dir: 'rtl' }, s.ar), h('span', { class: 'check' }, st.complete ? '✓' : '')),
       h('div', { class: 'docs' },
-        st.documents.length ? h('ul', { class: 'list small' }, ...st.documents.map((d) => h('li', {}, `${d.name || d.docType} · ${(d.size / 1024).toFixed(0)} KB`))) : h('p', { class: 'muted small' }, 'No document uploaded yet.'),
-        editable ? h('label', { class: 'upload' }, 'Upload PDF or photo', file) : null),
+        st.documents.length ? h('ul', { class: 'list small' }, ...st.documents.map((d) => h('li', {},
+          h('span', {}, `${d.name || d.docType} · ${(d.size / 1024).toFixed(0)} KB`),
+          canRead ? h('button', { class: 'btn ghost small', type: 'button', onclick: () => readDocument(d.id) }, 'Read numbers · قراءة الأرقام') : null)))
+          : h('p', { class: 'muted small' }, 'No document uploaded yet.'),
+        editable ? h('label', { class: 'upload' }, me.features.aiReading ? 'Upload PDF or photo — the numbers are read automatically' : 'Upload PDF or photo', file) : null),
+      reviewNote,
       figForm);
   };
 

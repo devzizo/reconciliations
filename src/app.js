@@ -7,6 +7,7 @@ import { reconciliationRoutes } from './routes/reconciliations.js';
 import { documentRoutes } from './routes/documents.js';
 import { cashCaptureRoutes } from './routes/cashCapture.js';
 import { createCashCounter } from './services/cashCounter.js';
+import { createDocumentReader } from './services/documentReader.js';
 import { createAttestationVerifier } from './services/attestation.js';
 import { createFileStore } from './fileStore.js';
 import { hashPassword } from './auth.js';
@@ -15,6 +16,7 @@ export function createApp({ db, config }) {
   const app = express();
   const audit = createAudit(db);
   const cashCounter = createCashCounter(config);
+  const documentReader = createDocumentReader(config);
   const attestationVerifier = createAttestationVerifier(config);
   const files = createFileStore(db);
   app.disable('x-powered-by');
@@ -72,8 +74,8 @@ export function createApp({ db, config }) {
     await audit.record({ req, action: 'auth.password_changed' });
     res.status(204).end();
   });
-  api.get('/me', (req, res) => res.json({ user: req.user, features: { aiCounting: cashCounter.provider !== 'none', attestedCapture: Boolean(attestationVerifier) } }));
-  api.use('/reconciliations/:id/documents', documentRoutes({ db, audit, config, files }));
+  api.get('/me', (req, res) => res.json({ user: req.user, features: { aiCounting: cashCounter.provider !== 'none', aiReading: documentReader.provider !== 'none', attestedCapture: Boolean(attestationVerifier) } }));
+  api.use('/reconciliations/:id/documents', documentRoutes({ db, audit, config, files, documentReader }));
   api.use('/reconciliations', reconciliationRoutes({ db, audit }));
   api.use('/', cashCaptureRoutes({ db, audit, config, cashCounter, attestationVerifier, files }));
   app.use('/api', api);

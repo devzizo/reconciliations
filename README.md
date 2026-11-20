@@ -2,9 +2,14 @@
 
 Daily cash reconciliation for retail branches, in five stages:
 
-1. **Daily closing form** — upload the signed form (PDF or photo) and enter its figures.
-2. **Z report** — upload the POS Z report and enter its totals.
+1. **Daily closing form** — upload the signed form (PDF or photo).
+2. **Z report** — upload the POS Z report.
 3. **Bank settlement receipt** — upload the mada / card terminal reconciliation receipt.
+
+   For stages 1–3, when AI is enabled the figures are read from the uploaded document (handwritten
+   Arabic or Western digits included) and filled into the form. The employee checks each value — the
+   ones that were hard to read are flagged — corrects anything wrong and saves. Corrections are recorded
+   in the audit trail. HEIC photos can't be read; JPEG, PNG, WebP and PDF can.
 4. **Physical cash count** — **live camera only.** Photograph the cash; AI suggests denomination
    counts; the employee checks and confirms every line.
 5. **Summary** — expected vs counted cash and cross-checks between the documents, then submit.
@@ -95,7 +100,7 @@ Set `SEED_DEMO_DATA=false` to skip them.
 
 ### AI cash counting
 
-Set `ANTHROPIC_API_KEY` to enable Claude-based denomination counting (`CASH_AI_MODEL`, default
+Set `ANTHROPIC_API_KEY` to enable Claude-based denomination counting and reading of figures from the stage 1–3 documents (`CASH_AI_MODEL`, default
 `claude-opus-5-5`). Without it the review screen starts at zero and employees count by hand.
 
 ### Configuration

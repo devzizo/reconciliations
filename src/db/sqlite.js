@@ -8,7 +8,8 @@ export async function openSqlite(config) {
   fs.mkdirSync(config.dataDir, { recursive: true });
   const raw = new DatabaseSync(config.dbFile);
   raw.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
-  raw.exec(fs.readFileSync(path.join(config.root, 'migrations', '0001_init.sql'), 'utf8'));
+  const dir = path.join(config.root, 'migrations');
+  for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.sql')).sort()) raw.exec(fs.readFileSync(path.join(dir, f), 'utf8'));
   const plain = (r) => (r ? { ...r } : null);
   const db = {
     kind: 'sqlite',

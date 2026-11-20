@@ -62,3 +62,8 @@ table { width: 100%; border-collapse: collapse; } td, th { padding: 6px 4px; bor
 .issues { margin: 0; padding-inline-start: 20px; color: var(--muted); }
 .confirm-line { display: flex; gap: 10px; align-items: start; color: var(--text); font-size: .95rem; }
 .confirm-line input { width: 22px; height: 22px; margin-top: 2px; }
+
+/* AI-read figures awaiting review */
+input.suggested { background: var(--warn-bg); border-color: var(--accent); }
+input.suggested.low { border-color: var(--bad); border-width: 2px; }
+.toast.warn { background: var(--accent); color: #14213d; }
