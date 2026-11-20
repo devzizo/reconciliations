@@ -12,7 +12,52 @@ Daily cash reconciliation for retail branches, in five stages:
 Stage 4's security design, limits and the optional native attested-capture channel are in
 [`docs/stage4-camera-capture.md`](docs/stage4-camera-capture.md).
 
-## Run it
+## Live deployment (Cloudflare Workers)
+
+Deployed at **https://reconciliations.dev-zizo.workers.dev** as the Worker `reconciliations`, with the
+Cloudflare D1 database `reconciliations-db` (location hint: Eastern Europe, the closest D1 region to Saudi Arabia).
+
+- `src/worker.js` runs the same Express app on Workers (`nodejs_compat` + `cloudflare:node`), with D1
+  instead of `node:sqlite`. The front end in `public/` is bundled at build time
+  (`scripts/build-static.mjs`) and served with the headers in `public/_headers`.
+- Cash photographs and documents are stored in D1 as chunks (`file_chunks`), because R2 is not enabled
+  on the account. The D1 free plan caps a database at 500 MB; once R2 is enabled, move file storage
+  there (`src/fileStore.js` is the single place to change).
+- The account is on the Workers free plan (≈10 ms CPU per request), so new password hashes use
+  PBKDF2 with 30,000 iterations (`PASSWORD_PBKDF2_ITERATIONS` in `wrangler.jsonc`). Raise it on a paid plan;
+  existing hashes keep working because the iteration count is stored with each hash.
+- There are no demo accounts in production. Create users with:
+
+```bash
+node scripts/create-user.mjs --username jeddah.employee --name "Jeddah Employee" --role employee --branch jeddah --branch-name Jeddah --branch-name-ar جدة
+```
+
+  (prints a random password; users can change it from **Change password** in the app).
+
+Deploy changes:
+
+```bash
+npx wrangler d1 migrations apply reconciliations-db --remote
+```
+
+```bash
+npx wrangler deploy
+```
+
+Enable AI cash counting:
+
+```bash
+npx wrangler secret put ANTHROPIC_API_KEY
+```
+
+Smoke-test a deployment end to end (`BASE`, `EMP_USER`/`EMP_PASS`, `OTHER_USER`/`OTHER_PASS` for an
+employee of another branch, `MGR_USER`/`MGR_PASS`):
+
+```bash
+node scripts/smoke.mjs
+```
+
+## Run it locally
 
 Requires Node.js 22.5+ (uses the built-in `node:sqlite`).
 

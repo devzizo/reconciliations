@@ -1,7 +1,6 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import path from 'node:path';
 import { startTestServer, USERS } from '../helpers/server.js';
 import { liveFrameJpeg, galleryPhotoJpeg, MINIMAL_PDF } from '../helpers/jpeg.js';
 
@@ -62,7 +61,7 @@ describe('capture sessions', () => {
     const ttl = Date.parse(s.expiresAt) - Date.parse(s.issuedAt);
     assert.equal(ttl, srv.config.captureSessionTtlSeconds * 1000);
     // Only the hash is stored.
-    const row = srv.db.prepare('SELECT token_hash FROM capture_sessions WHERE id = ?').get(s.sessionId);
+    const row = (await srv.db.get('SELECT token_hash FROM capture_sessions WHERE id = ?', s.sessionId));
     assert.notEqual(row.token_hash, s.captureToken);
   });
 
@@ -102,10 +101,10 @@ describe('live capture upload', () => {
     assert.equal(r.data.employeeId, 'u-emp-tabuk');
     assert.ok(Date.parse(r.data.capturedAt) >= before - 1000);
     assert.deepEqual(r.data.flags, []);
-    const row = srv.db.prepare('SELECT * FROM cash_images WHERE id = ?').get(r.data.imageId);
-    assert.ok(fs.existsSync(row.storage_path));
-    // Stored outside the public web root.
-    assert.ok(!row.storage_path.startsWith(path.join(srv.config.root, 'public')));
+    const row = (await srv.db.get('SELECT * FROM cash_images WHERE id = ?', r.data.imageId));
+    // Stored in the database file store, never under the public web root.
+    assert.equal(row.storage_path, `cash-images/${r.data.imageId}.jpg`);
+    assert.equal((await srv.db.get('SELECT COUNT(*) AS n FROM file_chunks WHERE file_key = ?', row.storage_path)).n, 1);
   });
 
   test('ignores any client-supplied timestamp', async () => {
@@ -143,7 +142,7 @@ describe('live capture upload', () => {
     const r = await uploadFrame(s, { body: galleryPhotoJpeg() });
     assert.equal(r.status, 422);
     assert.equal(r.data.error.code, 'NOT_A_LIVE_CAPTURE');
-    const audit = srv.db.prepare("SELECT * FROM audit_log WHERE action = 'cash_capture.gallery_upload_rejected' AND entity_id = ?").get(s.sessionId);
+    const audit = (await srv.db.get("SELECT * FROM audit_log WHERE action = 'cash_capture.gallery_upload_rejected' AND entity_id = ?", s.sessionId));
     assert.ok(audit);
     assert.deepEqual(JSON.parse(audit.details_json).tags, ['Make']);
   });
@@ -180,7 +179,7 @@ describe('live capture upload', () => {
   test('expired sessions are refused', async () => {
     const rec = await newReconciliation();
     const s = await startSession(rec.id);
-    srv.db.prepare('UPDATE capture_sessions SET expires_at = ? WHERE id = ?').run(new Date(Date.now() - 1000).toISOString(), s.sessionId);
+    await srv.db.run('UPDATE capture_sessions SET expires_at = ? WHERE id = ?', new Date(Date.now() - 1000).toISOString(), s.sessionId);
     const r = await uploadFrame(s);
     assert.equal(r.status, 410);
     assert.equal(r.data.error.code, 'CAPTURE_SESSION_EXPIRED');
@@ -221,7 +220,7 @@ describe('ordinary upload endpoints refuse cash photographs', () => {
       const res = await fetch(`${srv.base}/api/reconciliations/${rec.id}/documents?type=${type}`, { method: 'POST', body: fd, headers: { Authorization: `Bearer ${emp}` } });
       assert.equal(res.status, 403);
       assert.equal((await res.json()).error.code, 'CASH_PHOTOS_CAMERA_ONLY');
-      assert.equal(srv.db.prepare('SELECT COUNT(*) AS n FROM documents WHERE reconciliation_id = ?').get(rec.id).n, 0);
+      assert.equal((await srv.db.get('SELECT COUNT(*) AS n FROM documents WHERE reconciliation_id = ?', rec.id)).n, 0);
     });
   }
 
@@ -353,8 +352,8 @@ describe('audit trail', () => {
     assert.equal(r.data.chain.ok, true);
     const actions = r.data.entries.map((e) => e.action);
     assert.deepEqual(actions, ['reconciliation.created', 'cash_capture.session_started', 'cash_capture.request_denied', 'cash_capture.image_captured']);
-    assert.throws(() => srv.db.prepare('UPDATE audit_log SET action = ? WHERE seq = 1').run('tampered'), /append-only/);
-    assert.throws(() => srv.db.prepare('DELETE FROM audit_log').run(), /append-only/);
+    await assert.rejects(srv.db.run('UPDATE audit_log SET action = ? WHERE seq = 1', 'tampered'), /append-only/);
+    await assert.rejects(srv.db.run('DELETE FROM audit_log'), /append-only/);
     assert.equal((await srv.call('GET', `/api/reconciliations/${rec.id}/audit`, { token: emp })).status, 403);
   });
 

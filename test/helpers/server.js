@@ -2,14 +2,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadConfig } from '../../src/config.js';
-import { openDatabase } from '../../src/db.js';
+import { openSqlite } from '../../src/db/sqlite.js';
 import { createApp } from '../../src/app.js';
 
 /** Start an isolated server on an ephemeral port with a throwaway data directory. */
 export async function startTestServer(overrides = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'recon-test-'));
-  const config = loadConfig({ dataDir, requireHttps: false, aiProvider: 'none', ...overrides });
-  const db = openDatabase(config);
+  const config = loadConfig({ dataDir, requireHttps: false, aiProvider: 'none', passwordIterations: 1000, ...overrides });
+  const db = await openSqlite(config);
   const app = createApp({ db, config });
   const server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
   const base = `http://127.0.0.1:${server.address().port}`;

@@ -1,11 +1,4 @@
-import fs from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
-import { hashPassword } from './auth.js';
-
-const SCHEMA = `
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
-
+-- Schema for the reconciliation app (SQLite / Cloudflare D1).
 CREATE TABLE IF NOT EXISTS branches (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -140,37 +133,19 @@ CREATE TABLE IF NOT EXISTS audit_log (
   ip TEXT,
   user_agent TEXT,
   details_json TEXT NOT NULL,
-  prev_hash TEXT NOT NULL,
+  prev_hash TEXT NOT NULL UNIQUE,  -- UNIQUE: concurrent writers cannot fork the chain
   hash TEXT NOT NULL
 );
 CREATE TRIGGER IF NOT EXISTS audit_log_no_update BEFORE UPDATE ON audit_log
   BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS audit_log_no_delete BEFORE DELETE ON audit_log
   BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
-`;
 
-export function openDatabase(config) {
-  fs.mkdirSync(config.dataDir, { recursive: true });
-  const db = new DatabaseSync(config.dbFile);
-  db.exec(SCHEMA);
-  if (config.seedDemoData) seed(db);
-  return db;
-}
-
-/** Demo branches and accounts so the app is usable out of the box. Change passwords before real use. */
-function seed(db) {
-  const existing = db.prepare('SELECT COUNT(*) AS n FROM users').get();
-  if (existing.n > 0) return;
-  const branches = [
-    ['tabuk', 'Tabuk', 'تبوك'],
-    ['najran', 'Najran', 'نجران'],
-  ];
-  const insertBranch = db.prepare('INSERT INTO branches (id, name, name_ar) VALUES (?, ?, ?)');
-  for (const b of branches) insertBranch.run(...b);
-  const insertUser = db.prepare(
-    'INSERT INTO users (id, username, display_name, password_hash, role, branch_id) VALUES (?, ?, ?, ?, ?, ?)',
-  );
-  insertUser.run('u-emp-tabuk', 'tabuk.employee', 'Tabuk Employee', hashPassword('change-me-tabuk'), 'employee', 'tabuk');
-  insertUser.run('u-emp-najran', 'najran.employee', 'Najran Employee', hashPassword('change-me-najran'), 'employee', 'najran');
-  insertUser.run('u-manager', 'finance.manager', 'Finance Manager', hashPassword('change-me-manager'), 'manager', null);
-}
+-- Binary files (cash photographs, stage 1-3 documents), stored in chunks so the same code works on
+-- SQLite and Cloudflare D1 (D1 caps a single value at ~2 MB).
+CREATE TABLE IF NOT EXISTS file_chunks (
+  file_key TEXT NOT NULL,
+  idx INTEGER NOT NULL,
+  data TEXT NOT NULL,              -- base64
+  PRIMARY KEY (file_key, idx)
+);

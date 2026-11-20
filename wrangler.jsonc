@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "reconciliations",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  // The front end (public/) is bundled into the Worker at build time and served by src/worker.js.
+  "build": { "command": "node scripts/build-static.mjs", "watch_dir": "public" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "reconciliations-db",
+      "database_id": "27677b63-6995-4ea5-8647-b94675f666ba",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    // Workers free plan allows ~10 ms CPU per request; raise this on a paid plan.
+    "PASSWORD_PBKDF2_ITERATIONS": "30000",
+    "SEED_DEMO_DATA": "false"
+  },
+  // Set ANTHROPIC_API_KEY with `npx wrangler secret put ANTHROPIC_API_KEY` to enable AI cash counting.
+  "observability": { "enabled": true }
+}

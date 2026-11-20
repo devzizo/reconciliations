@@ -42,10 +42,36 @@ function topBar() {
   return h('header', { class: 'topbar' },
     h('strong', {}, 'Reconciliation'),
     h('span', { class: 'muted' }, `${me.user.displayName}${me.user.branchId ? ` · ${me.user.branchId}` : ''}`),
-    h('button', { class: 'btn ghost small', type: 'button', onclick: async () => {
-      try { await api('/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
-      setAuthToken(null); renderLogin();
-    } }, 'Sign out'));
+    h('span', {},
+      h('button', { class: 'btn ghost small', type: 'button', onclick: renderChangePassword }, 'Change password'),
+      h('button', { class: 'btn ghost small', type: 'button', onclick: async () => {
+        try { await api('/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
+        setAuthToken(null); renderLogin();
+      } }, 'Sign out')));
+}
+
+function renderChangePassword() {
+  const current = h('input', { type: 'password', autocomplete: 'current-password', required: true });
+  const next = h('input', { type: 'password', autocomplete: 'new-password', required: true, minlength: '10' });
+  const again = h('input', { type: 'password', autocomplete: 'new-password', required: true, minlength: '10' });
+  const form = h('form', { class: 'card narrow' },
+    h('h2', {}, 'Change password · تغيير كلمة المرور'),
+    h('label', {}, 'Current password', current),
+    h('label', {}, 'New password (at least 10 characters)', next),
+    h('label', {}, 'Repeat new password', again),
+    h('div', { class: 'actions' },
+      h('button', { class: 'btn ghost', type: 'button', onclick: renderHome }, 'Cancel'),
+      h('button', { class: 'btn primary', type: 'submit' }, 'Save')));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (next.value !== again.value) return toast('The new passwords do not match.', 'error');
+    try {
+      await api('/auth/password', { method: 'POST', body: { currentPassword: current.value, newPassword: next.value } });
+      toast('Password changed.', 'ok');
+      renderHome();
+    } catch (err) { toast(err.message, 'error'); }
+  });
+  root.replaceChildren(topBar(), form);
 }
 
 async function renderHome() {

@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import { loadConfig } from './config.js';
-import { openDatabase } from './db.js';
+import { openSqlite } from './db/sqlite.js';
 import { createApp } from './app.js';
 
 const config = loadConfig();
-const db = openDatabase(config);
+const db = await openSqlite(config);
 const app = createApp({ db, config });
 
 const server = config.tlsCert && config.tlsKey

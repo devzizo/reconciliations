@@ -57,7 +57,7 @@ test('live camera launches, capture uploads, review screen requires confirmation
   await page.locator('.thumb button', { hasText: 'Retake' }).first().click();
   await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 1);
 
-  const imgs = srv.db.prepare('SELECT status FROM cash_images ORDER BY seq').all().map((r) => r.status);
+  const imgs = (await srv.db.all('SELECT status FROM cash_images ORDER BY seq')).map((r) => r.status);
   assert.deepEqual(imgs, ['retaken', 'active']);
 
   await page.click('text=Review count');
@@ -73,7 +73,7 @@ test('live camera launches, capture uploads, review screen requires confirmation
   await submit.click();
   await page.waitForSelector('text=240.00 SAR');
 
-  const row = srv.db.prepare('SELECT * FROM cash_counts').get();
+  const row = (await srv.db.get('SELECT * FROM cash_counts'));
   assert.equal(row.total_halalas, 24000);
   assert.deepEqual(JSON.parse(row.adjustments_json), [{ denomination: 'note_10', ai: 3, confirmed: 4 }]);
   await context.close();
@@ -89,7 +89,7 @@ test('camera permission denied → capture and submission blocked', { skip: !chr
   assert.equal(await page.isDisabled('button.shutter'), true);
   assert.equal(await page.isDisabled('text=Review count'), true);
   assert.equal(await page.locator('input[type=file]').count(), 0, 'no upload fallback offered');
-  assert.equal(srv.db.prepare("SELECT COUNT(*) AS n FROM capture_sessions cs JOIN reconciliations r ON r.id = cs.reconciliation_id WHERE r.business_date = '2026-11-17'").get().n, 0);
+  assert.equal((await srv.db.get("SELECT COUNT(*) AS n FROM capture_sessions cs JOIN reconciliations r ON r.id = cs.reconciliation_id WHERE r.business_date = '2026-11-17'")).n, 0);
   await context.close();
 });
 

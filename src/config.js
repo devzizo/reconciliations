@@ -1,8 +1,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(here, '..');
+// import.meta.url is not a file URL inside a bundled Cloudflare Worker; root is only used under Node.
+let root = '/';
+try { root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); } catch { /* Worker */ }
 
 function int(name, fallback) {
   const v = process.env[name];
@@ -38,6 +39,9 @@ export function loadConfig(overrides = {}) {
     aiProvider: process.env.CASH_AI_PROVIDER ?? (process.env.ANTHROPIC_API_KEY ? 'anthropic' : 'none'),
     aiModel: process.env.CASH_AI_MODEL ?? 'claude-opus-5-5',
     seedDemoData: (process.env.SEED_DEMO_DATA ?? 'true') === 'true',
+    serveStatic: true,
+    // PBKDF2 iterations for new password hashes. Lower on the Workers free plan (10 ms CPU per request).
+    passwordIterations: int('PASSWORD_PBKDF2_ITERATIONS', 100_000),
     ...overrides,
   };
 }
