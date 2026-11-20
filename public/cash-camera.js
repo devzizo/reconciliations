@@ -23,29 +23,29 @@ export function openCashCount({ root, recon, onClose }) {
     closed: false,
   };
 
-  const video = h('video', { class: 'cam-video', autoplay: true, muted: true, playsinline: true, 'aria-label': 'Live camera preview' });
+  const video = h('video', { class: 'cam-video', autoplay: true, muted: true, playsinline: true, 'aria-label': 'معاينة الكاميرا المباشرة' });
   // iOS Safari needs these as properties as well as attributes.
   video.muted = true;
   video.playsInline = true;
   video.setAttribute('webkit-playsinline', '');
 
   const status = h('div', { class: 'cam-status', role: 'status', 'aria-live': 'polite' });
-  const shutter = h('button', { class: 'shutter', type: 'button', disabled: true, 'aria-label': 'Capture photograph' });
-  const reviewBtn = h('button', { class: 'btn primary', type: 'button', disabled: true }, 'Review count · مراجعة العد');
-  const strip = h('div', { class: 'thumb-strip', 'aria-label': 'Captured photographs' });
+  const shutter = h('button', { class: 'shutter', type: 'button', disabled: true, 'aria-label': 'التقاط صورة', 'data-testid': 'shutter' });
+  const reviewBtn = h('button', { class: 'btn primary', type: 'button', disabled: true, 'data-testid': 'review-count' }, 'مراجعة العدّ');
+  const strip = h('div', { class: 'thumb-strip', 'aria-label': 'الصور الملتقطة' });
   const counter = h('span', { class: 'muted' });
   const blocked = h('div', { class: 'blocked', hidden: true });
-  const closeBtn = h('button', { class: 'btn ghost', type: 'button' }, '✕ Close');
+  const closeBtn = h('button', { class: 'btn ghost', type: 'button' }, '✕ إغلاق');
 
   const view = h('section', { class: 'cash-view' },
     h('header', { class: 'cash-head' },
-      h('div', {}, h('h2', {}, 'Physical cash count · عدّ النقد'), h('p', { class: 'muted' }, `${recon.branchName} · ${recon.businessDate}`)),
+      h('div', {}, h('h2', {}, 'عدّ النقد'), h('p', { class: 'muted' }, `${recon.branchNameAr || recon.branchName} · ${recon.businessDate}`)),
       closeBtn),
     h('div', { class: 'cam-frame' }, video, status, blocked),
     h('div', { class: 'cam-controls' }, h('div', { class: 'spacer' }), shutter, h('div', { class: 'spacer' })),
-    h('div', { class: 'strip-head' }, h('strong', {}, 'Photographs'), counter),
+    h('div', { class: 'strip-head' }, h('strong', {}, 'الصور'), counter),
     strip,
-    h('p', { class: 'muted small' }, 'Spread the notes and coins so each one is visible. Take several photographs if needed. Photographs go straight to the reconciliation and are not saved on this phone.'),
+    h('p', { class: 'muted small' }, 'افرد الأوراق النقدية والعملات بحيث تظهر كل قطعة. يمكنك التقاط أكثر من صورة. الصور تُرسل مباشرة للتسوية ولا تُحفظ على الجوال.'),
     h('div', { class: 'actions' }, reviewBtn),
   );
 
@@ -65,8 +65,8 @@ export function openCashCount({ root, recon, onClose }) {
     blocked.replaceChildren(
       h('strong', {}, title),
       h('p', {}, body),
-      h('p', { class: 'small' }, 'Cash count submission is blocked until the live camera is available. There is no photo upload alternative.'),
-      retry ? h('button', { class: 'btn primary', type: 'button', onclick: () => startCamera() }, 'Try camera again') : null,
+      h('p', { class: 'small' }, 'لا يمكن إرسال عدّ النقد حتى تتوفر الكاميرا المباشرة. لا يوجد بديل لرفع الصور.'),
+      retry ? h('button', { class: 'btn primary', type: 'button', onclick: () => startCamera() }, 'إعادة محاولة فتح الكاميرا') : null,
     );
     blocked.hidden = false;
     refreshButtons();
@@ -84,12 +84,12 @@ export function openCashCount({ root, recon, onClose }) {
   async function startCamera() {
     blocked.hidden = true;
     if (!window.isSecureContext) {
-      return showBlocked('Secure connection required', 'The camera can only be used over HTTPS. Open the app from its https:// address.', { retry: false });
+      return showBlocked('يلزم اتصال آمن', 'الكاميرا تعمل فقط عبر HTTPS. افتح التطبيق من رابط يبدأ بـ https://', { retry: false });
     }
     if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
-      return showBlocked('Camera not supported', 'This browser cannot open the camera. Use Safari on iPhone or Chrome on Android.', { retry: false });
+      return showBlocked('الكاميرا غير مدعومة', 'هذا المتصفح لا يستطيع فتح الكاميرا. استخدم Safari على الآيفون أو Chrome على أندرويد.', { retry: false });
     }
-    setStatus('Opening camera…');
+    setStatus('جاري فتح الكاميرا…');
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -100,31 +100,31 @@ export function openCashCount({ root, recon, onClose }) {
       setStatus('');
       const name = err?.name ?? '';
       if (name === 'NotAllowedError' || name === 'SecurityError') {
-        return showBlocked('Camera permission denied', 'Allow camera access for this site in your browser settings, then try again.');
+        return showBlocked('تم رفض إذن الكاميرا', 'اسمح لهذا الموقع باستخدام الكاميرا من إعدادات المتصفح ثم حاول مرة أخرى.');
       }
       if (name === 'NotFoundError' || name === 'OverconstrainedError' || name === 'DevicesNotFoundError') {
-        return showBlocked('No camera found', 'This device has no usable camera.');
+        return showBlocked('لا توجد كاميرا', 'هذا الجهاز لا يحتوي على كاميرا قابلة للاستخدام.');
       }
       if (name === 'NotSupportedError' || name === 'TypeError') {
-        return showBlocked('Camera not supported', 'This browser cannot open the camera. Use Safari on iPhone or Chrome on Android.', { retry: false });
+        return showBlocked('الكاميرا غير مدعومة', 'هذا المتصفح لا يستطيع فتح الكاميرا. استخدم Safari على الآيفون أو Chrome على أندرويد.', { retry: false });
       }
       if (name === 'NotReadableError' || name === 'AbortError') {
-        return showBlocked('Camera is busy', 'Another app is using the camera. Close it and try again.');
+        return showBlocked('الكاميرا مشغولة', 'تطبيق آخر يستخدم الكاميرا. أغلقه وحاول مرة أخرى.');
       }
-      return showBlocked('Camera unavailable', 'The camera could not be opened.');
+      return showBlocked('الكاميرا غير متاحة', 'تعذّر فتح الكاميرا.');
     }
     if (state.closed) { for (const t of stream.getTracks()) t.stop(); return; }
 
     state.stream = stream;
     state.track = stream.getVideoTracks()[0] ?? null;
-    if (!state.track) { stopCamera(); return showBlocked('Camera unavailable', 'No video track was provided.'); }
+    if (!state.track) { stopCamera(); return showBlocked('الكاميرا غير متاحة', 'لم تُرسل الكاميرا أي صورة.'); }
     state.track.addEventListener('ended', () => {
-      if (!state.closed) showBlocked('Camera stopped', 'The camera feed stopped. Reopen it to continue.');
+      if (!state.closed) showBlocked('توقفت الكاميرا', 'توقف بث الكاميرا. أعد فتحها للمتابعة.');
     });
     video.srcObject = stream;
     try { await video.play(); } catch { /* autoplay is allowed for muted inline video; ignore */ }
     await waitForFrames();
-    if (!video.videoWidth) { stopCamera(); return showBlocked('Camera unavailable', 'The camera did not deliver any picture.'); }
+    if (!video.videoWidth) { stopCamera(); return showBlocked('الكاميرا غير متاحة', 'لم تُظهر الكاميرا أي صورة.'); }
 
     state.cameraLive = true;
     setStatus('');
@@ -150,7 +150,7 @@ export function openCashCount({ root, recon, onClose }) {
       });
     } catch (err) {
       state.session = null;
-      showBlocked('Could not start capture', err.message, { retry: true });
+      showBlocked('تعذّر بدء التصوير', err.message, { retry: true });
       return;
     }
     clearThumbs();
@@ -194,7 +194,7 @@ export function openCashCount({ root, recon, onClose }) {
       blob = null;
       if (image) addThumb(image, thumb);
     } catch (err) {
-      toast(err.message || 'Capture failed.', 'error');
+      toast(err.message || 'فشل التصوير.', 'error');
     } finally {
       state.busy = false;
       refreshButtons();
@@ -215,7 +215,7 @@ export function openCashCount({ root, recon, onClose }) {
       });
     } catch (err) {
       if (err instanceof ApiError && (err.code === 'CAPTURE_SESSION_EXPIRED' || err.code === 'CAPTURE_SESSION_CLOSED')) {
-        toast('The capture timed out. Starting a new capture — please photograph the cash again.', 'warn');
+        toast('انتهت مهلة التصوير. بدأ تصوير جديد — صوّر النقد مرة أخرى.', 'warn');
         await startSession();
         return null;
       }
@@ -224,7 +224,7 @@ export function openCashCount({ root, recon, onClose }) {
   }
 
   function toJpeg(canvas, quality) {
-    return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not encode the photograph.'))), 'image/jpeg', quality));
+    return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('تعذّر حفظ الصورة.'))), 'image/jpeg', quality));
   }
 
   function makeThumb(src) {
@@ -242,7 +242,7 @@ export function openCashCount({ root, recon, onClose }) {
     const item = h('figure', { class: 'thumb' },
       thumb,
       h('figcaption', {}, `#${image.seq}`),
-      h('button', { class: 'btn small ghost', type: 'button', onclick: () => retake(image.imageId, item) }, 'Retake'));
+      h('button', { class: 'btn small ghost', type: 'button', onclick: () => retake(image.imageId, item) }, 'إعادة'));
     state.images.push({ imageId: image.imageId, seq: image.seq });
     strip.append(item);
   }
@@ -276,7 +276,7 @@ export function openCashCount({ root, recon, onClose }) {
     if (reviewBtn.disabled) return;
     state.busy = true;
     refreshButtons();
-    setStatus('Counting the cash… this can take up to a minute.');
+    setStatus('جاري عدّ النقد… قد يستغرق ذلك دقيقة.');
     try {
       const { analysis, denominations } = await api(`/cash-capture/sessions/${state.session.sessionId}/finalize`, {
         method: 'POST', headers: { 'X-Capture-Token': state.session.captureToken },
@@ -298,7 +298,7 @@ export function openCashCount({ root, recon, onClose }) {
     const lineTotals = new Map();
     const totalEl = h('strong', { class: 'grand-total' });
     const confirmBox = h('input', { type: 'checkbox', id: 'confirm-count' });
-    const submit = h('button', { class: 'btn primary', type: 'button', disabled: true }, 'Confirm cash count · تأكيد');
+    const submit = h('button', { class: 'btn primary', type: 'button', disabled: true, 'data-testid': 'confirm-count-btn' }, 'تأكيد عدّ النقد');
 
     const recompute = () => {
       let sum = 0;
@@ -314,22 +314,22 @@ export function openCashCount({ root, recon, onClose }) {
         lineTotals.get(d.id).textContent = formatSar(line);
         sum += line;
       }
-      totalEl.textContent = `${formatSar(sum)} SAR`;
+      totalEl.textContent = `${formatSar(sum)} ريال`;
       submit.disabled = !valid || !confirmBox.checked;
     };
 
     const rows = denominations.map((d) => {
-      const input = h('input', { type: 'number', inputmode: 'numeric', min: '0', step: '1', value: String(analysis.counts[d.id] ?? 0), 'aria-label': `Count of ${d.label}` });
+      const input = h('input', { type: 'number', inputmode: 'numeric', min: '0', step: '1', value: String(analysis.counts[d.id] ?? 0), 'aria-label': `عدد ${d.labelAr}` });
       input.addEventListener('input', recompute);
       inputs.set(d.id, input);
       const line = h('td', { class: 'num' });
       lineTotals.set(d.id, line);
-      return h('tr', {}, h('td', {}, d.label, h('div', { class: 'muted small', dir: 'rtl' }, d.labelAr)), h('td', { class: 'num muted' }, String(analysis.counts[d.id] ?? 0)), h('td', {}, input), line);
+      return h('tr', {}, h('td', {}, d.labelAr), h('td', { class: 'num muted' }, String(analysis.counts[d.id] ?? 0)), h('td', {}, input), line);
     });
 
     const aiNote = analysis.status === 'completed'
-      ? h('p', { class: 'note' }, 'These counts were suggested by AI from your photographs. AI can miscount overlapping or folded notes — check every line against the cash in front of you and correct it.')
-      : h('p', { class: 'note warn' }, 'Automatic counting is not available for this capture. Enter every count by hand.');
+      ? h('p', { class: 'note' }, 'هذه الأعداد اقترحها الذكاء الاصطناعي من صورك. قد يخطئ في الأوراق المتداخلة أو المطوية — راجع كل سطر مقابل النقد أمامك وصحّحه.')
+      : h('p', { class: 'note warn' }, 'العدّ الآلي غير متاح لهذا التصوير. أدخل كل عدد يدويًا.');
 
     confirmBox.addEventListener('change', recompute);
     submit.addEventListener('click', async () => {
@@ -337,7 +337,7 @@ export function openCashCount({ root, recon, onClose }) {
       const counts = Object.fromEntries(denominations.map((d) => [d.id, Number(inputs.get(d.id).value.trim() || 0)]));
       try {
         const res = await api(`/reconciliations/${recon.id}/cash-count/confirm`, { method: 'POST', body: { analysisId: analysis.analysisId, counts, confirmed: true } });
-        toast(`Cash count confirmed: ${res.total} SAR`, 'ok');
+        toast(`تم تأكيد عدّ النقد: ${res.total} ريال`, 'ok');
         close();
       } catch (err) {
         toast(err.message, 'error');
@@ -346,16 +346,16 @@ export function openCashCount({ root, recon, onClose }) {
     });
 
     const review = h('section', { class: 'cash-view review' },
-      h('header', { class: 'cash-head' }, h('div', {}, h('h2', {}, 'Review cash count · مراجعة العد'), h('p', { class: 'muted' }, `${analysis.imageIds.length} photograph(s) · ${recon.branchName} · ${recon.businessDate}`)), closeBtn),
+      h('header', { class: 'cash-head' }, h('div', {}, h('h2', {}, 'مراجعة عدّ النقد'), h('p', { class: 'muted' }, `${analysis.imageIds.length} صورة · ${recon.branchNameAr || recon.branchName} · ${recon.businessDate}`)), closeBtn),
       aiNote,
       analysis.issues.length ? h('ul', { class: 'issues' }, ...analysis.issues.map((i) => h('li', {}, i))) : null,
       h('table', { class: 'denoms' },
-        h('thead', {}, h('tr', {}, h('th', {}, 'Denomination'), h('th', { class: 'num' }, 'AI'), h('th', {}, 'Confirmed'), h('th', { class: 'num' }, 'SAR'))),
+        h('thead', {}, h('tr', {}, h('th', {}, 'الفئة'), h('th', { class: 'num' }, 'الآلي'), h('th', {}, 'المؤكد'), h('th', { class: 'num' }, 'ريال'))),
         h('tbody', {}, ...rows),
-        h('tfoot', {}, h('tr', {}, h('td', { colspan: '3' }, 'Total counted'), h('td', { class: 'num' }, totalEl)))),
-      h('label', { class: 'confirm-line', for: 'confirm-count' }, confirmBox, ' I have checked every count against the physical cash and confirm the total. · أؤكد صحة العد'),
+        h('tfoot', {}, h('tr', {}, h('td', { colspan: '3' }, 'إجمالي النقد المعدود'), h('td', { class: 'num' }, totalEl)))),
+      h('label', { class: 'confirm-line', for: 'confirm-count' }, confirmBox, ' راجعت كل عدد مقابل النقد الفعلي وأؤكد صحة الإجمالي.'),
       h('div', { class: 'actions' },
-        h('button', { class: 'btn ghost', type: 'button', onclick: () => { root.replaceChildren(view); startCamera(); } }, 'Recapture'),
+        h('button', { class: 'btn ghost', type: 'button', onclick: () => { root.replaceChildren(view); startCamera(); } }, 'إعادة التصوير'),
         submit),
     );
     root.replaceChildren(review);
@@ -367,7 +367,7 @@ export function openCashCount({ root, recon, onClose }) {
   function onVisibility() {
     // Release the camera whenever the page is hidden; ask again on return.
     if (document.hidden) {
-      if (state.stream) { stopCamera(); setStatus(''); showBlocked('Camera paused', 'The camera was released while the app was in the background.'); }
+      if (state.stream) { stopCamera(); setStatus(''); showBlocked('تم إيقاف الكاميرا مؤقتًا', 'أُغلقت الكاميرا عندما خرجت من التطبيق. أعد فتحها للمتابعة.'); }
     }
   }
 

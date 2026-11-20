@@ -37,7 +37,7 @@ export function cashCaptureRoutes({ db, audit, config, cashCounter, attestationV
 
   async function assertStageOpen(rec) {
     if (await q.cashCount(rec.id)) {
-      throw new HttpError(409, 'CASH_COUNT_ALREADY_CONFIRMED', 'The cash count for this reconciliation is already confirmed.');
+      throw new HttpError(409, 'CASH_COUNT_ALREADY_CONFIRMED', 'تم تأكيد عدّ النقد لهذا اليوم مسبقًا.');
     }
   }
 
@@ -47,7 +47,7 @@ export function cashCaptureRoutes({ db, audit, config, cashCounter, attestationV
    */
   async function authoriseSession(req, { requireOpen = true } = {}) {
     const session = await q.session(req.params.sid);
-    if (!session) throw new HttpError(404, 'CAPTURE_SESSION_NOT_FOUND', 'Capture session not found.');
+    if (!session) throw new HttpError(404, 'CAPTURE_SESSION_NOT_FOUND', 'جلسة التصوير غير موجودة.');
 
     const deny = async (status, code, message, reason) => {
       await audit.record({ req, action: 'cash_capture.request_denied', reconciliationId: session.reconciliation_id, entityType: 'capture_session', entityId: session.id, details: { reason } });
@@ -55,23 +55,23 @@ export function cashCaptureRoutes({ db, audit, config, cashCounter, attestationV
     };
 
     if (!tokenMatches(req.get('x-capture-token'), session.token_hash)) {
-      throw await deny(401, 'INVALID_CAPTURE_TOKEN', 'Capture session token is missing or invalid.', 'bad_token');
+      throw await deny(401, 'INVALID_CAPTURE_TOKEN', 'رمز جلسة التصوير مفقود أو غير صالح.', 'bad_token');
     }
     if (session.user_id !== req.user.id) {
-      throw await deny(403, 'CAPTURE_SESSION_NOT_YOURS', 'This capture session belongs to another employee.', 'wrong_user');
+      throw await deny(403, 'CAPTURE_SESSION_NOT_YOURS', 'جلسة التصوير هذه تخص موظفًا آخر.', 'wrong_user');
     }
     if (session.branch_id !== req.user.branchId) {
-      throw await deny(403, 'CAPTURE_SESSION_WRONG_BRANCH', 'This capture session belongs to another branch.', 'wrong_branch');
+      throw await deny(403, 'CAPTURE_SESSION_WRONG_BRANCH', 'جلسة التصوير هذه تخص فرعًا آخر.', 'wrong_branch');
     }
     const rec = await q.reconciliation(session.reconciliation_id);
     if (!rec || rec.branch_id !== session.branch_id) {
-      throw await deny(403, 'CAPTURE_SESSION_MISMATCH', 'Capture session does not match its reconciliation.', 'reconciliation_mismatch');
+      throw await deny(403, 'CAPTURE_SESSION_MISMATCH', 'جلسة التصوير لا تطابق التسوية.', 'reconciliation_mismatch');
     }
-    if (rec.status !== 'open') throw new HttpError(409, 'RECONCILIATION_CLOSED', 'This reconciliation has already been submitted.');
+    if (rec.status !== 'open') throw new HttpError(409, 'RECONCILIATION_CLOSED', 'تم إرسال تسوية هذا اليوم مسبقًا ولا يمكن تعديلها.');
     if (requireOpen) {
-      if (session.status !== 'open') throw new HttpError(409, 'CAPTURE_SESSION_CLOSED', 'This capture session is closed. Start a new capture.');
+      if (session.status !== 'open') throw new HttpError(409, 'CAPTURE_SESSION_CLOSED', 'جلسة التصوير مغلقة. ابدأ تصويرًا جديدًا.');
       if (Date.parse(session.expires_at) <= Date.now()) {
-        throw await deny(410, 'CAPTURE_SESSION_EXPIRED', 'This capture session has expired. Start a new capture.', 'expired');
+        throw await deny(410, 'CAPTURE_SESSION_EXPIRED', 'انتهت مهلة جلسة التصوير. ابدأ تصويرًا جديدًا.', 'expired');
       }
     }
     await assertStageOpen(rec);
@@ -109,20 +109,20 @@ export function cashCaptureRoutes({ db, audit, config, cashCounter, attestationV
 
   /** Shared by the browser and native-attested channels. `body` is the raw JPEG. */
   async function storeCapture(req, { session, rec }, body, { attestation = null } = {}) {
-    if (!Buffer.isBuffer(body) || body.length === 0) throw new HttpError(400, 'EMPTY_IMAGE', 'No image data received.');
+    if (!Buffer.isBuffer(body) || body.length === 0) throw new HttpError(400, 'EMPTY_IMAGE', 'لم تصل أي صورة.');
     if ((await q.activeImages(session.id)).length >= session.max_images) {
-      throw new HttpError(409, 'CAPTURE_LIMIT_REACHED', `At most ${session.max_images} photographs per capture. Retake one instead.`);
+      throw new HttpError(409, 'CAPTURE_LIMIT_REACHED', `الحد الأقصى ${session.max_images} صور في كل تصوير. أعد التقاط صورة بدلًا من ذلك.`);
     }
 
     const info = inspectJpeg(body);
-    if (!info.valid) throw new HttpError(422, 'INVALID_IMAGE', `The image is not a complete JPEG (${info.reason}).`);
+    if (!info.valid) throw new HttpError(422, 'INVALID_IMAGE', `الصورة غير مكتملة أو تالفة (${info.reason}).`);
     if (info.cameraExifTags.length) {
       await audit.record({ req, action: 'cash_capture.gallery_upload_rejected', reconciliationId: rec.id, entityType: 'capture_session', entityId: session.id,
         details: { via: 'capture_session', reason: 'camera_exif_present', tags: info.cameraExifTags } });
-      throw new HttpError(422, 'NOT_A_LIVE_CAPTURE', 'This image was not captured from the live camera preview. Use the in-app camera.');
+      throw new HttpError(422, 'NOT_A_LIVE_CAPTURE', 'هذه الصورة لم تُلتقط من الكاميرا المباشرة. استخدم الكاميرا داخل التطبيق.');
     }
     if (Math.min(info.width, info.height) < config.captureMinShortSide) {
-      throw new HttpError(422, 'IMAGE_TOO_SMALL', `Photograph resolution is too low (${info.width}×${info.height}). Move closer or use a better camera.`);
+      throw new HttpError(422, 'IMAGE_TOO_SMALL', `دقة الصورة منخفضة (${info.width}×${info.height}). اقترب أكثر أو استخدم كاميرا أفضل.`);
     }
 
     const meta = parseClientMeta(req);
@@ -157,7 +157,7 @@ export function cashCaptureRoutes({ db, audit, config, cashCounter, attestationV
     const type = (req.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
     if (type !== 'image/jpeg') {
       await audit.record({ req, action: 'cash_capture.gallery_upload_rejected', details: { via: 'capture_session', reason: 'wrong_content_type', contentType: type.slice(0, 80), sessionId: req.params.sid } });
-      throw new HttpError(415, 'CAMERA_CAPTURE_ONLY', 'Cash photographs must be captured from the live camera. File uploads are not accepted.');
+      throw new HttpError(415, 'CAMERA_CAPTURE_ONLY', 'صور النقد يجب أن تُلتقط بالكاميرا المباشرة. رفع الملفات غير مسموح.');
     }
     next();
   }
@@ -181,7 +181,7 @@ export function cashCaptureRoutes({ db, audit, config, cashCounter, attestationV
     await assertStageOpen(rec);
     const channel = req.body?.channel === 'native_attested' ? 'native_attested' : 'browser';
     if (channel === 'native_attested' && !attestationVerifier) {
-      throw new HttpError(501, 'ATTESTATION_NOT_CONFIGURED', 'Native attested capture is not enabled on this server.');
+      throw new HttpError(501, 'ATTESTATION_NOT_CONFIGURED', 'التصوير عبر التطبيق الموثّق غير مفعّل على الخادم.');
     }
     const cam = req.body?.camera ?? {};
     const cameraInfo = {
@@ -224,16 +224,16 @@ export function cashCaptureRoutes({ db, audit, config, cashCounter, attestationV
 
   r.post('/cash-capture/sessions/:sid/images', requireRole('employee'), requireRawJpeg, rawJpeg, async (req, res) => {
     const ctx = await authoriseSession(req);
-    if (ctx.session.channel !== 'browser') throw new HttpError(409, 'WRONG_CHANNEL', 'This session requires attested capture.');
+    if (ctx.session.channel !== 'browser') throw new HttpError(409, 'WRONG_CHANNEL', 'هذه الجلسة تتطلب التصوير الموثّق.');
     const image = await storeCapture(req, ctx, req.body);
     res.status(201).json({ ...image, sessionId: ctx.session.id, reconciliationId: ctx.rec.id, branchId: ctx.session.branch_id, employeeId: ctx.session.user_id });
   });
 
   // Optional native-app channel. Returns 501 unless an attestation verifier is configured.
   r.post('/cash-capture/sessions/:sid/attested-images', requireRole('employee'), requireRawJpeg, rawJpeg, async (req, res) => {
-    if (!attestationVerifier) throw new HttpError(501, 'ATTESTATION_NOT_CONFIGURED', 'Native attested capture is not enabled on this server.');
+    if (!attestationVerifier) throw new HttpError(501, 'ATTESTATION_NOT_CONFIGURED', 'التصوير عبر التطبيق الموثّق غير مفعّل على الخادم.');
     const ctx = await authoriseSession(req);
-    if (ctx.session.channel !== 'native_attested') throw new HttpError(409, 'WRONG_CHANNEL', 'This session is not an attested-capture session.');
+    if (ctx.session.channel !== 'native_attested') throw new HttpError(409, 'WRONG_CHANNEL', 'هذه الجلسة ليست جلسة تصوير موثّق.');
     const imageSha256 = sha256Hex(req.body ?? Buffer.alloc(0));
     const result = await attestationVerifier.verify({
       attestation: req.get('x-device-attestation') ?? '',
@@ -243,7 +243,7 @@ export function cashCaptureRoutes({ db, audit, config, cashCounter, attestationV
     });
     if (!result?.ok) {
       await audit.record({ req, action: 'cash_capture.attestation_failed', reconciliationId: ctx.rec.id, entityType: 'capture_session', entityId: ctx.session.id, details: { reason: result?.reason ?? 'unknown', verifier: attestationVerifier.name } });
-      throw new HttpError(403, 'ATTESTATION_FAILED', 'Device attestation failed.');
+      throw new HttpError(403, 'ATTESTATION_FAILED', 'فشل التحقق من الجهاز.');
     }
     const image = await storeCapture(req, ctx, req.body, { attestation: { verifier: attestationVerifier.name, deviceId: result.deviceId, platform: result.platform, details: result.details ?? null } });
     res.status(201).json({ ...image, sessionId: ctx.session.id, reconciliationId: ctx.rec.id, attested: true });
@@ -252,8 +252,8 @@ export function cashCaptureRoutes({ db, audit, config, cashCounter, attestationV
   r.delete('/cash-capture/sessions/:sid/images/:imageId', requireRole('employee'), async (req, res) => {
     const { session, rec } = await authoriseSession(req);
     const img = await q.image(req.params.imageId);
-    if (!img || img.session_id !== session.id) throw new HttpError(404, 'NOT_FOUND', 'Photograph not found in this capture.');
-    if (img.status !== 'active') throw new HttpError(409, 'ALREADY_RETAKEN', 'This photograph was already discarded.');
+    if (!img || img.session_id !== session.id) throw new HttpError(404, 'NOT_FOUND', 'الصورة غير موجودة في هذا التصوير.');
+    if (img.status !== 'active') throw new HttpError(409, 'ALREADY_RETAKEN', 'هذه الصورة محذوفة مسبقًا.');
     await db.run("UPDATE cash_images SET status = 'retaken', retaken_at = ? WHERE id = ?", new Date().toISOString(), img.id);
     // The file is kept: discarded captures stay in the audit trail.
     await audit.record({ req, action: 'cash_capture.image_retaken', reconciliationId: rec.id, entityType: 'cash_image', entityId: img.id, details: { sessionId: session.id, seq: img.seq } });
@@ -263,10 +263,10 @@ export function cashCaptureRoutes({ db, audit, config, cashCounter, attestationV
   r.post('/cash-capture/sessions/:sid/finalize', requireRole('employee'), async (req, res) => {
     const { session, rec } = await authoriseSession(req);
     const images = await q.activeImages(session.id);
-    if (images.length === 0) throw new HttpError(409, 'NO_PHOTOGRAPHS', 'Capture at least one photograph of the cash first.');
+    if (images.length === 0) throw new HttpError(409, 'NO_PHOTOGRAPHS', 'التقط صورة واحدة للنقد على الأقل.');
     const now = new Date().toISOString();
     const done = await db.run("UPDATE capture_sessions SET status = 'finalized', finalized_at = ? WHERE id = ? AND status = 'open'", now, session.id);
-    if (done.changes !== 1) throw new HttpError(409, 'CAPTURE_SESSION_CLOSED', 'This capture session is already closed.');
+    if (done.changes !== 1) throw new HttpError(409, 'CAPTURE_SESSION_CLOSED', 'جلسة التصوير مغلقة.');
     await audit.record({ req, action: 'cash_capture.session_finalized', reconciliationId: rec.id, entityType: 'capture_session', entityId: session.id, details: { imageIds: images.map((i) => i.id) } });
 
     const loaded = [];
@@ -288,19 +288,19 @@ export function cashCaptureRoutes({ db, audit, config, cashCounter, attestationV
     const rec = await loadReconciliation(db, req.params.id, req.user, { write: true });
     await assertStageOpen(rec);
     if (req.body?.confirmed !== true) {
-      throw new HttpError(400, 'CONFIRMATION_REQUIRED', 'Confirm that you have checked every denomination count against the physical cash.');
+      throw new HttpError(400, 'CONFIRMATION_REQUIRED', 'أكّد أنك راجعت عدد كل فئة مقابل النقد الفعلي.');
     }
     const analysis = await q.analysis(String(req.body?.analysisId ?? ''));
-    if (!analysis || analysis.reconciliation_id !== rec.id) throw new HttpError(404, 'ANALYSIS_NOT_FOUND', 'Cash analysis not found for this reconciliation.');
-    if ((await q.latestAnalysis(rec.id)).id !== analysis.id) throw new HttpError(409, 'ANALYSIS_STALE', 'A newer capture exists. Review the latest one.');
+    if (!analysis || analysis.reconciliation_id !== rec.id) throw new HttpError(404, 'ANALYSIS_NOT_FOUND', 'لم يتم العثور على نتيجة عدّ النقد لهذه التسوية.');
+    if ((await q.latestAnalysis(rec.id)).id !== analysis.id) throw new HttpError(409, 'ANALYSIS_STALE', 'يوجد تصوير أحدث. راجع آخر تصوير.');
     const session = await q.session(analysis.session_id);
     if (session.user_id !== req.user.id || session.status !== 'finalized') {
-      throw new HttpError(403, 'CAPTURE_SESSION_NOT_YOURS', 'Only the employee who captured the cash can confirm this count.');
+      throw new HttpError(403, 'CAPTURE_SESSION_NOT_YOURS', 'فقط الموظف الذي صوّر النقد يمكنه تأكيد العدّ.');
     }
     const imageIds = JSON.parse(analysis.image_ids_json);
     const stillActive = (await q.activeImages(session.id)).map((i) => i.id);
     if (imageIds.length === 0 || imageIds.some((i) => !stillActive.includes(i))) {
-      throw new HttpError(409, 'NO_PHOTOGRAPHS', 'This count is not backed by live camera photographs.');
+      throw new HttpError(409, 'NO_PHOTOGRAPHS', 'هذا العدّ غير مدعوم بصور من الكاميرا المباشرة.');
     }
 
     let counts;
@@ -319,7 +319,7 @@ export function cashCaptureRoutes({ db, audit, config, cashCounter, attestationV
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       rec.id, session.id, analysis.id, req.user.id, now, JSON.stringify(counts), total, analysis.counts_json, analysis.total_halalas, JSON.stringify(adjustments));
     } catch (err) {
-      if (/UNIQUE|PRIMARY KEY/i.test(String(err?.message))) throw new HttpError(409, 'CASH_COUNT_ALREADY_CONFIRMED', 'The cash count for this reconciliation is already confirmed.');
+      if (/UNIQUE|PRIMARY KEY/i.test(String(err?.message))) throw new HttpError(409, 'CASH_COUNT_ALREADY_CONFIRMED', 'تم تأكيد عدّ النقد لهذا اليوم مسبقًا.');
       throw err;
     }
     await audit.record({ req, action: 'cash_count.confirmed', reconciliationId: rec.id, entityType: 'cash_count', entityId: rec.id,
@@ -330,7 +330,7 @@ export function cashCaptureRoutes({ db, audit, config, cashCounter, attestationV
   r.get('/cash-capture/images/:imageId', async (req, res) => {
     const img = await q.image(req.params.imageId);
     const allowed = img && (req.user.role === 'manager' || img.user_id === req.user.id);
-    if (!allowed) throw new HttpError(404, 'NOT_FOUND', 'Photograph not found.');
+    if (!allowed) throw new HttpError(404, 'NOT_FOUND', 'الصورة غير موجودة.');
     await audit.record({ req, action: 'cash_capture.image_viewed', reconciliationId: img.reconciliation_id, entityType: 'cash_image', entityId: img.id });
     res.set({ 'Cache-Control': 'private, no-store', 'Content-Disposition': 'inline' });
     res.type('image/jpeg').send(await files.get(img.storage_path));

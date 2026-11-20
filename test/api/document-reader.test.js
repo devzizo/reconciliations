@@ -61,7 +61,7 @@ test('handwritten closing form values: Arabic digits, low confidence, unreadable
   assert.equal(r.fields.returns, 0);
   assert.equal(r.fields.closing_cash_balance, null);
   assert.deepEqual(r.lowConfidence, ['cash_sales']);
-  assert.ok(r.issues.some((i) => /closing_cash_balance/.test(i)));
+  assert.ok(r.issues.some((i) => /رصيد الصندوق آخر اليوم/.test(i)));
 });
 
 test('refusal / API error → failed, employee enters by hand', async () => {
@@ -130,7 +130,7 @@ test('other branches cannot read your documents', async () => {
 
 test('save accepts Arabic-Indic digits typed on a phone keyboard', async () => {
   const rec = (await srv.call('POST', '/api/reconciliations', { token: emp, json: { businessDate: '2026-11-17' } })).data.reconciliation;
-  const r = await srv.call('PUT', `/api/reconciliations/${rec.id}/stages/daily_closing_form`, { token: emp, json: { gross_sales: '١٠٬٦٩٠', cash_sales: '٦٧٩٧' } });
+  const r = await srv.call('PUT', `/api/reconciliations/${rec.id}/stages/daily_closing_form`, { token: emp, json: { gross_sales: '١٠٬٦٩٠', returns: '٠', net_sales: '١٠٦٩٠', mada: '٣٨٩٣', cash_sales: '٦٧٩٧' } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.stages.daily_closing_form.figures.gross_sales, 1069000);
 });

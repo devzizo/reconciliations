@@ -41,7 +41,7 @@ export async function api(path, { method = 'GET', body, rawBody, formData, heade
   try {
     res = await fetch(`/api${path}`, init);
   } catch {
-    throw new ApiError(0, 'NETWORK', 'Network error. Check your connection and try again.');
+    throw new ApiError(0, 'NETWORK', 'تعذّر الاتصال. تحقق من الإنترنت وحاول مرة أخرى.');
   }
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
@@ -50,7 +50,7 @@ export async function api(path, { method = 'GET', body, rawBody, formData, heade
       setAuthToken(null);
       window.dispatchEvent(new Event('auth-expired'));
     }
-    throw new ApiError(res.status, data?.error?.code ?? 'ERROR', data?.error?.message ?? `Request failed (${res.status}).`);
+    throw new ApiError(res.status, data?.error?.code ?? 'ERROR', data?.error?.message ?? `فشل الطلب (${res.status}).`);
   }
   return data;
 }
@@ -62,4 +62,19 @@ export function toast(message, kind = 'info') {
   const el = h('div', { class: `toast ${kind}`, role: kind === 'error' ? 'alert' : 'status' }, message);
   host.append(el);
   setTimeout(() => el.remove(), 5000);
+}
+
+const AR_DIGITS = { '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
+  '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9' };
+
+/** Same parsing as the server: halalas, null when empty, undefined when invalid. Accepts Arabic digits. */
+export function parseAmount(value) {
+  let s = String(value ?? '').trim().replace(/[٠-٩۰-۹]/g, (d) => AR_DIGITS[d]);
+  if (s === '') return null;
+  s = s.replace(/[٫]/g, '.').replace(/[,،٬\s]/g, '');
+  if (!/^-?\d{1,9}(\.\d{1,2})?$/.test(s)) return undefined;
+  const neg = s.startsWith('-');
+  const [w, f = ''] = s.replace('-', '').split('.');
+  const v = Number(w) * 100 + Number(f.padEnd(2, '0'));
+  return neg ? -v : v;
 }

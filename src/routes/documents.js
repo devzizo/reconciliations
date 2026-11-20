@@ -30,9 +30,9 @@ export function documentRoutes({ db, audit, config, files, documentReader }) {
     if (CASH_TYPES.has(type)) {
       await audit.record({ req, action: 'cash_capture.gallery_upload_rejected', reconciliationId: req.params.id, details: { via: 'documents', requestedType: type } });
       throw new HttpError(403, 'CASH_PHOTOS_CAMERA_ONLY',
-        'Cash count photographs can only be taken with the live camera in the cash-counting stage. File uploads are not accepted.');
+        'صور عدّ النقد تُلتقط فقط بالكاميرا المباشرة في مرحلة عدّ النقد. رفع الملفات غير مسموح.');
     }
-    if (!DOCUMENT_TYPES.has(type)) throw new HttpError(400, 'INVALID_DOCUMENT_TYPE', `type must be one of: ${[...DOCUMENT_TYPES].join(', ')}.`);
+    if (!DOCUMENT_TYPES.has(type)) throw new HttpError(400, 'INVALID_DOCUMENT_TYPE', 'نوع المستند غير معروف.');
     await loadReconciliation(db, req.params.id, req.user, { write: true });
     req.docType = type;
     next();
@@ -40,28 +40,33 @@ export function documentRoutes({ db, audit, config, files, documentReader }) {
 
   r.post('/', guardType, rawMultipart, async (req, res) => {
     const rec = await loadReconciliation(db, req.params.id, req.user, { write: true });
-    if (!Buffer.isBuffer(req.body) || req.body.length === 0) throw new HttpError(400, 'FILE_REQUIRED', 'Attach a PDF or image in the "file" field.');
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) throw new HttpError(400, 'FILE_REQUIRED', 'أرفق ملف PDF أو صورة.');
     let file;
     try {
       const form = await new Response(req.body, { headers: { 'content-type': req.get('content-type') } }).formData();
       file = form.get('file');
     } catch {
-      throw new HttpError(400, 'UPLOAD_FAILED', 'Could not read the uploaded form.');
+      throw new HttpError(400, 'UPLOAD_FAILED', 'تعذّر قراءة الملف المرفوع.');
     }
-    if (!file || typeof file === 'string') throw new HttpError(400, 'FILE_REQUIRED', 'Attach a PDF or image in the "file" field.');
+    if (!file || typeof file === 'string') throw new HttpError(400, 'FILE_REQUIRED', 'أرفق ملف PDF أو صورة.');
     const buf = Buffer.from(await file.arrayBuffer());
-    if (buf.length > config.documentMaxBytes) throw new HttpError(413, 'TOO_LARGE', 'The upload is too large.');
+    if (buf.length > config.documentMaxBytes) throw new HttpError(413, 'TOO_LARGE', 'حجم الملف كبير جدًا.');
     const mime = (file.type || '').toLowerCase();
     const check = ALLOWED_MIME.get(mime);
-    if (!check || !check(buf)) throw new HttpError(415, 'UNSUPPORTED_FILE', 'Upload a PDF, JPEG, PNG, WebP or HEIC file.');
+    if (!check || !check(buf)) throw new HttpError(415, 'UNSUPPORTED_FILE', 'ارفع ملف PDF أو صورة (JPEG أو PNG أو WebP أو HEIC).');
 
     const id = crypto.randomUUID();
     const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
     const key = `documents/${id}`;
     await files.put(key, buf);
+    // One document per type per day: the new upload replaces the current one (kept for the audit trail).
+    const now = new Date().toISOString();
+    const previous = await db.get("SELECT id FROM documents WHERE reconciliation_id = ? AND doc_type = ? AND status = 'current'", rec.id, req.docType);
+    if (previous) await db.run("UPDATE documents SET status = 'replaced', replaced_at = ? WHERE id = ?", now, previous.id);
     await db.run(`INSERT INTO documents (id, reconciliation_id, doc_type, original_name, mime_type, size_bytes, sha256, storage_path, uploaded_by, uploaded_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, rec.id, req.docType, String(file.name ?? '').slice(0, 200), mime, buf.length, sha256, key, req.user.id, new Date().toISOString());
-    await audit.record({ req, action: 'document.uploaded', reconciliationId: rec.id, entityType: 'document', entityId: id, details: { docType: req.docType, mimeType: mime, size: buf.length, sha256 } });
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, rec.id, req.docType, String(file.name ?? '').slice(0, 200), mime, buf.length, sha256, key, req.user.id, now);
+    await audit.record({ req, action: previous ? 'document.replaced' : 'document.uploaded', reconciliationId: rec.id, entityType: 'document', entityId: id,
+      details: { docType: req.docType, mimeType: mime, size: buf.length, sha256, replacedDocumentId: previous?.id ?? null } });
     res.status(201).json({ documentId: id, ...(await detail(db, rec)) });
   });
 
@@ -69,8 +74,8 @@ export function documentRoutes({ db, audit, config, files, documentReader }) {
   // pre-fills the form and the employee checks and saves (PUT /stages/:stage with extractionId).
   r.post('/:docId/extract', async (req, res) => {
     const rec = await loadReconciliation(db, req.params.id, req.user, { write: true });
-    const doc = await db.get('SELECT * FROM documents WHERE id = ? AND reconciliation_id = ?', req.params.docId, rec.id);
-    if (!doc) throw new HttpError(404, 'NOT_FOUND', 'Document not found.');
+    const doc = await db.get("SELECT * FROM documents WHERE id = ? AND reconciliation_id = ? AND status = 'current'", req.params.docId, rec.id);
+    if (!doc) throw new HttpError(404, 'NOT_FOUND', 'المستند غير موجود.');
     const result = await documentReader.read({ docType: doc.doc_type, mimeType: doc.mime_type, bytes: await files.get(doc.storage_path) });
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -86,7 +91,7 @@ export function documentRoutes({ db, audit, config, files, documentReader }) {
   r.get('/:docId', async (req, res) => {
     const rec = await loadReconciliation(db, req.params.id, req.user);
     const doc = await db.get('SELECT * FROM documents WHERE id = ? AND reconciliation_id = ?', req.params.docId, rec.id);
-    if (!doc) throw new HttpError(404, 'NOT_FOUND', 'Document not found.');
+    if (!doc) throw new HttpError(404, 'NOT_FOUND', 'المستند غير موجود.');
     res.set('Cache-Control', 'private, no-store');
     res.type(doc.mime_type).send(await files.get(doc.storage_path));
   });

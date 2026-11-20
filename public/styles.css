@@ -1,40 +1,79 @@
+/* Light theme only, right-to-left (Arabic). */
 :root {
-  --bg: #f4f5f7; --surface: #fff; --text: #14213d; --muted: #5b6475; --line: #dde1e8;
-  --primary: #14213d; --primary-text: #fff; --accent: #fca311; --ok: #1b7f4b; --bad: #b42318; --warn-bg: #fff4e0;
+  --bg: #f5f6f8; --surface: #ffffff; --text: #1d2433; --muted: #667085; --line: #d9dde3; --head: #eef1f5;
+  --primary: #1d2433; --primary-text: #ffffff; --accent: #f59e0b; --ok: #15803d; --ok-bg: #ecfdf3; --bad: #b42318; --bad-bg: #fef3f2;
+  --warn-bg: #fff7e6;
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root { --bg: #0f1420; --surface: #171e2e; --text: #e7eaf0; --muted: #9aa3b5; --line: #2a3347;
-    --primary: #fca311; --primary-text: #14213d; --warn-bg: #3a2c12; color-scheme: dark; }
-}
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif; }
+html { background: var(--bg); }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 "SF Arabic", "Segoe UI", Tahoma, "Noto Sans Arabic", "Noto Naskh Arabic", system-ui, sans-serif; }
 main { max-width: 760px; margin: 0 auto; padding: 12px 16px calc(24px + env(safe-area-inset-bottom)); }
-h1 { font-size: 1.4rem; margin: 0 0 4px; } h2 { font-size: 1.15rem; margin: 0 0 8px; } h3 { font-size: 1.05rem; margin: 0 0 10px; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+h1 { font-size: 1.35rem; margin: 0 0 4px; } h2 { font-size: 1.15rem; margin: 0 0 8px; }
+h3 { font-size: 1.1rem; margin: 0 0 12px; display: flex; gap: 8px; align-items: center; }
 .muted { color: var(--muted); } .small { font-size: .85rem; }
+.brand { font-weight: 800; letter-spacing: .2em; font-size: 1.4rem; direction: ltr; text-align: center; }
+.brand.small { font-size: 1rem; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 12px 0; }
 .card.narrow { max-width: 380px; margin: 10vh auto; display: grid; gap: 12px; }
 .card.row { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
 label { display: grid; gap: 4px; font-size: .9rem; color: var(--muted); }
-input { font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); min-width: 0; }
-input.invalid { border-color: var(--bad); outline-color: var(--bad); }
+input, textarea { font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--text); min-width: 0; width: 100%; }
+textarea { resize: vertical; }
+input:disabled, textarea:disabled { background: var(--head); color: var(--text); }
+input.invalid { border-color: var(--bad); background: var(--bad-bg); }
 .btn { font: inherit; border: 1px solid var(--line); background: var(--surface); color: var(--text); padding: 10px 16px; border-radius: 10px; cursor: pointer; min-height: 44px; }
 .btn.primary { background: var(--primary); color: var(--primary-text); border-color: var(--primary); font-weight: 600; }
-.btn.ghost { background: transparent; white-space: nowrap; } .btn.small { padding: 4px 10px; min-height: 32px; font-size: .85rem; }
+.btn.ghost { background: transparent; white-space: nowrap; }
+.btn.small { padding: 4px 10px; min-height: 32px; font-size: .85rem; }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .link { background: none; border: 0; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; padding: 0; }
 .topbar { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 8px 0; flex-wrap: wrap; }
-.crumbs { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.list { list-style: none; padding: 0; margin: 0; } .list li { display: flex; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
-.pill { font-size: .75rem; padding: 2px 8px; border-radius: 999px; background: var(--line); } .pill.submitted { background: var(--ok); color: #fff; }
+.top-actions { display: flex; gap: 4px; }
+.crumbs { display: flex; gap: 12px; align-items: center; }
+.list { list-style: none; padding: 0; margin: 0; } .list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.pill { font-size: .8rem; padding: 2px 10px; border-radius: 999px; background: var(--head); } .pill.submitted { background: var(--ok); color: #fff; }
+.day-head { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+.day-head .pill { margin-inline-start: auto; }
 .stage.done { border-color: var(--ok); } .check { color: var(--ok); margin-inline-start: auto; font-weight: 700; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; align-items: end; }
-.upload input { padding: 6px; } .docs { display: grid; gap: 8px; }
-table { width: 100%; border-collapse: collapse; } td, th { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: start; }
-.num { text-align: end; font-variant-numeric: tabular-nums; } .bad { color: var(--bad); font-weight: 600; }
-.note { background: var(--warn-bg); padding: 10px 12px; border-radius: 8px; } .note.warn { border-inline-start: 4px solid var(--accent); }
+.actions { display: flex; gap: 12px; justify-content: flex-end; flex-wrap: wrap; margin-top: 12px; }
+
+/* Document (one per day) */
+.doc-box { display: grid; gap: 10px; padding: 12px; border: 1px dashed var(--line); border-radius: 10px; background: var(--head); }
+.doc-name { margin: 0; font-weight: 600; word-break: break-all; }
+.doc-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.busy { margin: 0; font-weight: 600; color: var(--text); }
+.busy::before { content: ''; display: inline-block; width: 14px; height: 14px; margin-inline-end: 8px; vertical-align: -2px; border: 2px solid var(--line); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Paper-form layout */
+.figures { margin-top: 12px; }
+.form-section { margin-top: 12px; border: 1px solid var(--text); border-radius: 4px; overflow: hidden; }
+.section-bar { display: flex; justify-content: space-between; gap: 8px; background: var(--head); border-bottom: 1px solid var(--text); padding: 6px 10px; font-weight: 700; }
+.section-bar .en { font-size: .75rem; font-weight: 600; color: var(--muted); direction: ltr; align-self: center; }
+table.paper { width: 100%; border-collapse: collapse; }
+table.paper th, table.paper td { border-bottom: 1px solid var(--line); padding: 6px 10px; vertical-align: middle; }
+table.paper tr:last-child th, table.paper tr:last-child td { border-bottom: 0; }
+table.paper th { text-align: start; font-weight: 600; width: 55%; }
+table.paper th .en { display: block; font-size: .72rem; font-weight: 400; color: var(--muted); direction: ltr; text-align: end; }
+table.paper td input { text-align: left; font-variant-numeric: tabular-nums; }
+.form-section textarea { border: 0; border-radius: 0; }
+.sum-row th, .sum-row td { background: var(--head); }
+.total { font-weight: 700; direction: ltr; text-align: left; }
+input.suggested { background: var(--warn-bg); border-color: var(--accent); }
+input.suggested.low { border-color: var(--bad); border-width: 2px; }
+.checks { margin-top: 12px; display: grid; gap: 4px; }
+.checks p { margin: 0; padding: 8px 10px; border-radius: 8px; font-weight: 600; }
+.checks .ok { background: var(--ok-bg); color: var(--ok); }
+.checks .bad { background: var(--bad-bg); color: var(--bad); }
+
+table.summary { width: 100%; border-collapse: collapse; } table.summary td { padding: 6px 4px; border-bottom: 1px solid var(--line); }
+.num { text-align: left; font-variant-numeric: tabular-nums; } .bad { color: var(--bad); font-weight: 600; }
+.note { background: var(--warn-bg); padding: 10px 12px; border-radius: 8px; margin: 10px 0; } .note.warn { border-inline-start: 4px solid var(--accent); }
+.note p { margin: 0 0 6px; }
 .toasts { position: fixed; inset: auto 12px calc(12px + env(safe-area-inset-bottom)) 12px; display: grid; gap: 8px; z-index: 50; pointer-events: none; }
-.toast { background: var(--text); color: var(--bg); padding: 10px 14px; border-radius: 10px; } .toast.error { background: var(--bad); color: #fff; } .toast.ok { background: var(--ok); color: #fff; }
+.toast { background: var(--text); color: #fff; padding: 10px 14px; border-radius: 10px; }
+.toast.error { background: var(--bad); } .toast.ok { background: var(--ok); } .toast.warn { background: var(--accent); color: var(--text); }
 
 /* Stage 4 camera */
 .cash-view { display: grid; gap: 12px; }
@@ -55,15 +94,10 @@ table { width: 100%; border-collapse: collapse; } td, th { padding: 6px 4px; bor
 .thumb { margin: 0; display: grid; gap: 4px; justify-items: center; flex: 0 0 auto; }
 .thumb-canvas { width: 96px; height: auto; border-radius: 6px; border: 1px solid var(--line); -webkit-touch-callout: none; user-select: none; }
 .thumb figcaption { font-size: .75rem; color: var(--muted); }
-.actions { display: flex; gap: 12px; justify-content: flex-end; flex-wrap: wrap; }
-.denoms input { width: 90px; text-align: end; }
+.denoms { width: 100%; border-collapse: collapse; } .denoms td, .denoms th { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: start; }
+.denoms input { width: 90px; text-align: left; }
 .denoms tr.changed td:first-child { border-inline-start: 3px solid var(--accent); }
-.grand-total { font-size: 1.1rem; }
+.grand-total { font-size: 1.1rem; direction: ltr; display: inline-block; }
 .issues { margin: 0; padding-inline-start: 20px; color: var(--muted); }
 .confirm-line { display: flex; gap: 10px; align-items: start; color: var(--text); font-size: .95rem; }
-.confirm-line input { width: 22px; height: 22px; margin-top: 2px; }
-
-/* AI-read figures awaiting review */
-input.suggested { background: var(--warn-bg); border-color: var(--accent); }
-input.suggested.low { border-color: var(--bad); border-width: 2px; }
-.toast.warn { background: var(--accent); color: #14213d; }
+.confirm-line input { width: 22px; height: 22px; margin-top: 2px; flex: none; }

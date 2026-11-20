@@ -32,7 +32,7 @@ test('sends both photographs with a strict JSON schema, adaptive thinking and se
   assert.equal(r.counts.note_500, 2);
   assert.equal(r.counts.note_10, 7);
   assert.equal(r.counts.note_100, 0);
-  assert.match(r.issues[0], /Low confidence for: 10 SAR/);
+  assert.match(r.issues[0], /قراءة غير مؤكدة لفئة: ١٠ ريال/);
 });
 
 test('clamps negative or absurd counts and drops unknown denominations', async () => {
@@ -54,7 +54,7 @@ for (const [name, response] of [
     const r = await counterWith(fakeClient(() => response)).analyze(images);
     assert.equal(r.status, 'failed');
     assert.ok(Object.values(r.counts).every((n) => n === 0));
-    assert.match(r.issues[0], /by hand/);
+    assert.match(r.issues[0], /يدويًا/);
   });
 }
 
@@ -62,7 +62,7 @@ test('API errors become a failed analysis rather than an exception', async () =>
   const client = fakeClient(() => { throw new Anthropic.APIConnectionError({ message: 'down' }); });
   const r = await counterWith(client).analyze(images);
   assert.equal(r.status, 'failed');
-  assert.match(r.issues[0], /Could not reach/);
+  assert.match(r.issues[0], /تعذّر الاتصال/);
 });
 
 test('jpeg inspection: dimensions, completeness and camera EXIF', () => {

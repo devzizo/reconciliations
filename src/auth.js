@@ -66,10 +66,10 @@ export function authenticate(db) {
   return async (req, _res, next) => {
     try {
       const match = /^Bearer\s+(\S+)$/i.exec(req.get('authorization') ?? '');
-      if (!match) throw new HttpError(401, 'UNAUTHENTICATED', 'Sign in required.');
+      if (!match) throw new HttpError(401, 'UNAUTHENTICATED', 'يجب تسجيل الدخول.');
       const row = await db.get(`SELECT u.id, u.username, u.display_name, u.role, u.branch_id, t.expires_at
         FROM auth_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = ?`, sha256Hex(match[1]));
-      if (!row || Date.parse(row.expires_at) <= Date.now()) throw new HttpError(401, 'UNAUTHENTICATED', 'Session expired. Sign in again.');
+      if (!row || Date.parse(row.expires_at) <= Date.now()) throw new HttpError(401, 'UNAUTHENTICATED', 'انتهت الجلسة. سجّل الدخول مرة أخرى.');
       req.user = { id: row.id, username: row.username, displayName: row.display_name, role: row.role, branchId: row.branch_id };
       req.authToken = match[1];
       next();
@@ -82,7 +82,7 @@ export function authenticate(db) {
 export function requireRole(...roles) {
   return (req, _res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {
-      return next(new HttpError(403, 'FORBIDDEN', 'You do not have permission for this action.'));
+      return next(new HttpError(403, 'FORBIDDEN', 'ليست لديك صلاحية لهذا الإجراء.'));
     }
     next();
   };
