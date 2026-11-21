@@ -30,8 +30,11 @@ export async function api(path, { method = 'GET', body, rawBody, headers = {}, e
   let res;
   try {
     res = await fetch(`/api${path}`, init);
-  } catch {
-    throw new ApiError(0, 'NETWORK', 'تعذّر الاتصال. تحقق من الإنترنت وحاول مرة أخرى.');
+  } catch (err) {
+    // Only call it a connection problem when it is one; otherwise show what actually went wrong.
+    if (navigator.onLine === false) throw new ApiError(0, 'OFFLINE', 'الجوال غير متصل بالإنترنت. تحقق من الاتصال وحاول مرة أخرى.');
+    if (/fetch|load failed|network/i.test(String(err?.message))) throw new ApiError(0, 'NETWORK', 'تعذّر الوصول إلى الخادم. حاول مرة أخرى.');
+    throw new ApiError(0, 'CLIENT', `تعذّر إرسال الطلب: ${err?.message ?? err}`);
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, data?.error?.code ?? 'ERROR', data?.error?.message ?? `فشل الطلب (${res.status}).`, data?.error?.details);
@@ -43,6 +46,12 @@ const KEY = (pid) => `edit-token:${pid}`;
 export const editTokens = {
   get(pid) { try { return localStorage.getItem(KEY(pid)); } catch { return null; } },
   set(pid, token) { try { localStorage.setItem(KEY(pid), token); } catch { /* storage blocked */ } },
+};
+
+// The latest reconciliation started on this phone (the only one shown on the home page).
+export const lastMatch = {
+  get() { try { return localStorage.getItem('last-match'); } catch { return null; } },
+  set(pid) { try { localStorage.setItem('last-match', pid); } catch { /* storage blocked */ } },
 };
 
 export const formatSar = (halalas) => (halalas === null || halalas === undefined ? '—' : (halalas / 100).toFixed(2));
@@ -64,4 +73,9 @@ export async function copyText(text) {
   try { ok = document.execCommand('copy'); } catch { /* ignore */ }
   ta.remove();
   return ok;
+}
+
+/** JSON that is safe in an HTTP header: non-ASCII (e.g. an Arabic camera name) is \u-escaped. */
+export function headerJson(value) {
+  return JSON.stringify(value).replace(/[\u007f-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
 }

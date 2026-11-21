@@ -4,8 +4,8 @@ Open web app (Arabic, right-to-left) for reconciling each branch's day. Everythi
 taken with the live camera and read by AI — the daily closing form (branch and date included), Z report,
 bank settlement receipt, yesterday's cash deposit receipt, expense invoices and the cash itself. Figures
 can't be typed or edited; the app checks them against each other and shows matched (green) /
-unmatched (red, with the difference) and yellow alerts. The home page lists the latest reconciliations
-with their number, status, QR code and a copyable link.
+unmatched (red, with the difference) and yellow alerts. Each reconciliation opens only through its own link or
+QR code; the home page shows just the latest one started on that phone.
 
 How it works, the rules, and the security limits (no accounts!): [`docs/camera-capture.md`](docs/camera-capture.md).
 

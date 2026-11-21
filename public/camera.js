@@ -6,7 +6,7 @@
 //    (iOS long-press offers "Save to Photos" on images); thumbnails are small canvases.
 //  * If the camera is unavailable, denied, or stops, capturing and sending are disabled.
 
-import { h, api, ApiError, toast } from './ui.js';
+import { h, api, ApiError, headerJson, toast } from './ui.js';
 
 const MAX_LONG_SIDE = 2560;
 
@@ -155,7 +155,7 @@ export function openCamera(o) {
       try {
         image = await api(`/camera/sessions/${state.session.sessionId}/captures`, {
           method: 'POST', rawBody: blob,
-          headers: { 'Content-Type': 'image/jpeg', 'X-Capture-Token': state.session.captureToken, 'X-Capture-Meta': JSON.stringify({ videoWidth: vw, videoHeight: vh, facingMode: s.facingMode ?? null, trackLabel: state.track?.label ?? null }) },
+          headers: { 'Content-Type': 'image/jpeg', 'X-Capture-Token': state.session.captureToken, 'X-Capture-Meta': headerJson({ videoWidth: vw, videoHeight: vh, facingMode: s.facingMode ?? null, trackLabel: state.track?.label ?? null }) },
         });
       } catch (err) {
         if (err instanceof ApiError && (err.code === 'CAPTURE_SESSION_EXPIRED' || err.code === 'CAPTURE_SESSION_CLOSED')) {

@@ -97,10 +97,16 @@ test('full flow from the home page; figures are read-only; viewers get QR and li
   assert.equal(await viewer.locator('[data-testid^=photo-]').count(), 0);
   assert.equal(await viewer.locator('.share img.qr').count(), 1);
 
-  // Home page lists it with number, red status, QR and copy link.
+  // Another phone's home page shows no reconciliations at all.
   await viewer.goto(srv.base);
-  await viewer.waitForSelector('[data-testid=match-card]');
-  const card = viewer.locator('[data-testid=match-card]').first();
+  await viewer.waitForSelector('[data-testid=new-match]');
+  assert.equal(await viewer.locator('[data-testid=match-card]').count(), 0);
+
+  // The phone that made it sees only its latest reconciliation: number, red status, QR and copy link.
+  await page.goto(srv.base);
+  await page.waitForSelector('[data-testid=match-card]');
+  const card = page.locator('[data-testid=match-card]');
+  assert.equal(await card.count(), 1);
   assert.match(await card.textContent(), /#1001.*تبوك.*غير مطابقة/s);
   assert.equal(await card.locator('img.qr').count(), 1);
   assert.equal(await card.locator('[data-testid=copy-link]').count(), 1);
@@ -145,4 +151,18 @@ test('unreadable form header → told to photograph again', { skip }, async () =
   await page.waitForSelector('.cam-result:not([hidden])');
   assert.match(await page.textContent('.cam-result'), /تعذّر قراءة التاريخ/);
   await page.waitForSelector('[data-testid=shutter]:not([disabled])'); // ready to photograph again
+});
+
+test('Arabic camera name (Arabic-language phones) does not break taking a photo', { skip }, async () => {
+  const page = await newPage();
+  await page.addInitScript(() => { Object.defineProperty(MediaStreamTrack.prototype, 'label', { get: () => 'الكاميرا الخلفية' }); });
+  await page.goto(srv.base);
+  await page.click('[data-testid=new-match]');
+  await page.waitForSelector('[data-testid=shutter]:not([disabled])');
+  await page.click('[data-testid=shutter]');
+  await page.waitForSelector('.thumb canvas');
+  assert.equal(await page.locator('.toast.error').count(), 0);
+  const c = await srv.db.get("SELECT id FROM captures ORDER BY captured_at DESC LIMIT 1");
+  const audit = await srv.db.get("SELECT details_json FROM audit_log WHERE action = 'camera.captured' AND entity_id = ?", c.id);
+  assert.equal(JSON.parse(audit.details_json).clientMeta.trackLabel, 'الكاميرا الخلفية');
 });

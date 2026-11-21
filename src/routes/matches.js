@@ -7,7 +7,8 @@ import { DOC_NAMES, evaluate, weekdayOf } from '../services/checks.js';
 import { DENOMINATIONS, formatSar } from '../services/denominations.js';
 
 /**
- * Reconciliations ("مطابقات"). Open to everyone for viewing (list, link, QR). Changes are only accepted
+ * Reconciliations ("مطابقات"). Viewable by anyone who has a reconciliation's link or QR code (there is no
+ * public list). Changes are only accepted
  * from the device that started the reconciliation (it holds the edit token), and only through
  * photographs — there is no endpoint to type or edit a figure.
  */
@@ -89,7 +90,7 @@ export function createMatches({ db, audit, files }) {
         // Pending AI count awaiting confirmation; photos of cash are only shown to the editing device.
         pending: !confirmation && cashReading && editable ? { readingId: cashReading.id, status: cashReading.status, counts: cashReading.fields, totalHalalas: cashReading.extras.totalHalalas, issues: cashReading.issues } : null,
       },
-      yesterday: yesterday ? { number: yesterday.number, publicId: yesterday.publicId } : null,
+      yesterday: yesterday ? { number: yesterday.number } : null,
       denominations: DENOMINATIONS,
       ...evaluation,
     };
@@ -183,14 +184,8 @@ export function createMatches({ db, audit, files }) {
 
   // ---------------------------------------------------------------- routes
 
-  r.get('/matches', async (req, res) => {
-    const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 30, 1), 100);
-    const rows = await db.all(`SELECT m.*, b.name, b.name_ar FROM matches m JOIN branches b ON b.id = m.branch_id
-      ORDER BY m.business_date DESC, m.number DESC LIMIT ?`, limit);
-    res.set('Cache-Control', 'no-store');
-    res.json({ matches: rows.map((m) => ({ number: m.number, publicId: m.public_id, branchName: m.name_ar || m.name, businessDate: m.business_date,
-      weekday: weekdayOf(m.business_date), status: m.status, result: m.result, updatedAt: m.updated_at, submittedAt: m.submitted_at })) });
-  });
+  // There is deliberately no endpoint that lists reconciliations: each one is reachable only through its
+  // own unguessable link (or the QR code of that link). They all stay in the database.
 
   r.get('/matches/:pid', async (req, res) => {
     const m = await byPublicId(req.params.pid);

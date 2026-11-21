@@ -30,9 +30,8 @@ test('photographing the closing form creates the reconciliation: branch and date
   // The reader was given the list of active branches to pick from.
   assert.deepEqual(reader.calls.at(-1).branches.map((b) => b.id), ['najran', 'tabuk']);
 
-  const list = await srv.call('GET', '/api/matches');
-  assert.equal(list.data.matches[0].number, 1001);
-  assert.equal(list.data.matches[0].status, 'open');
+  // No public list: older reconciliations open only through their own link / QR.
+  assert.equal((await srv.call('GET', '/api/matches')).status, 404);
   const pub = await srv.call('GET', `/api/matches/${m.publicId}`);
   assert.equal(pub.data.canEdit, false, 'viewers without the token cannot edit');
 });
@@ -131,8 +130,7 @@ test('full day: every document photographed → matched → submitted; QR and li
   assert.equal(sub.data.match.result, 'matched');
   assert.equal((await srv.call('POST', '/api/camera/sessions', { editToken: m.editToken, json: { kind: 'z_report', publicId: m.publicId } })).data.error.code, 'MATCH_SUBMITTED');
 
-  const list = (await srv.call('GET', '/api/matches')).data.matches.find((x) => x.number === m.number);
-  assert.equal(list.result, 'matched');
+  assert.equal((await srv.call('GET', `/api/matches/${m.publicId}`)).data.match.result, 'matched');
   const qr = await fetch(`${srv.base}/api/matches/${m.publicId}/qr.svg`);
   assert.equal(qr.headers.get('content-type'), 'image/svg+xml; charset=utf-8');
   assert.match(await qr.text(), /^<svg/);

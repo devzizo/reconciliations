@@ -24,7 +24,7 @@ await step('home page: Arabic RTL, camera permission policy, no logo', async () 
   assert.doesNotMatch(html, /HOVEN/i);
   assert.match(r.headers.get('permissions-policy') ?? '', /camera=\(self\)/);
 });
-await step('latest reconciliations list is public', async () => { const r = await j('GET', '/api/matches'); assert.equal(r.status, 200); assert.ok(Array.isArray(r.data.matches)); });
+await step('no public list of reconciliations (link / QR only)', async () => { assert.equal((await j('GET', '/api/matches')).status, 404); });
 await step('share link route serves the app', async () => { assert.match(await (await fetch(`${BASE}/m/abc`)).text(), /dir="rtl"/); });
 await step('no login endpoint any more', async () => { assert.equal((await j('POST', '/api/auth/login', { json: {} })).status, 404); });
 await step('camera session for a new closing form', async () => {

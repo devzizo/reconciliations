@@ -18,8 +18,9 @@ photographs it again.
 3. Cash: the AI counts each denomination; the employee compares and **confirms** (or photographs again).
 4. **اعتماد المطابقة** once every required photograph is in. The result is stored as matched / unmatched.
 
-Anyone can open the home page, see the latest reconciliations (number, branch, date, status), open one by
-its link or QR code, and copy the link. Only the phone that started a reconciliation holds its secret
+There is no public list. The home page shows only the latest reconciliation started on that phone
+(number, branch, date, status, QR code, copyable link). Every reconciliation stays in the database and
+opens only through its own unguessable link or its QR code. Only the phone that started a reconciliation holds its secret
 edit token (kept in that browser) and can add photographs to it.
 
 ## Rules (`src/services/checks.js`)
@@ -40,6 +41,8 @@ inconsistencies are yellow alerts.
 
 ## Capture integrity
 
+- The client's camera details are sent in an ASCII-escaped header (Arabic-language phones report an
+  Arabic camera name, which browsers refuse to put in a header as-is).
 - Live `getUserMedia()` preview, rear camera preferred; frames go `<video>` → `<canvas>` → JPEG and are
   uploaded immediately. No `<input type=file>`, no paste/drop, no download links, no `<img>` of a captured
   frame (iOS "Save to Photos"); the camera is released when the app goes to the background.
@@ -53,7 +56,8 @@ inconsistencies are yellow alerts.
 ## Limits — read this
 
 - **There are no user accounts.** Anyone with the site address can start a reconciliation for any
-  branch whose form they can photograph, and anyone can view every reconciliation and its document photos.
+  branch whose form they can photograph, and anyone holding a reconciliation's link or QR code can view it
+  and its document photos.
   Cash photos are only shown to the phone that took them. If that is not acceptable, put the site behind
   Cloudflare Access (or bring back sign-in).
 - Browser capture cannot prove a scene is live: a virtual camera, a photo of a screen, or a scripted

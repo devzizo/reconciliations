@@ -1,4 +1,4 @@
-import { h, api, copyText, editTokens, formatSar, toast } from './ui.js';
+import { h, api, copyText, editTokens, lastMatch, formatSar, toast } from './ui.js';
 import { openCamera } from './camera.js';
 
 const root = document.getElementById('app');
@@ -46,9 +46,9 @@ function copyButton(pid) {
 
 async function renderHome() {
   document.title = 'مطابقة الإقفال اليومي';
-  const list = h('div', { class: 'match-list', 'aria-busy': 'true' }, h('p', { class: 'muted center' }, 'جاري التحميل…'));
   const start = h('button', { class: 'btn primary hero-btn', type: 'button', 'data-testid': 'new-match' }, '＋ مطابقة جديدة');
   start.addEventListener('click', startNewMatch);
+  const latest = h('section', { class: 'latest' });
   root.replaceChildren(
     h('section', { class: 'hero' },
       h('h1', {}, 'مطابقة الإقفال اليومي'),
@@ -58,25 +58,27 @@ async function renderHome() {
         h('li', {}, h('span', {}, '١'), 'صوّر اليومية'),
         h('li', {}, h('span', {}, '٢'), 'صوّر التقارير والإيصالات'),
         h('li', {}, h('span', {}, '٣'), 'عدّ النقد بالكاميرا'))),
-    h('section', { class: 'latest' }, h('h2', {}, 'آخر المطابقات'), list));
+    latest);
 
-  try {
-    const { matches } = await api('/matches?limit=30');
-    list.removeAttribute('aria-busy');
-    if (!matches.length) return list.replaceChildren(h('p', { class: 'muted center' }, 'لا توجد مطابقات بعد.'));
-    list.replaceChildren(...matches.map((m) => h('article', { class: `match-card ${m.status === 'open' ? 'is-open' : m.result}`, 'data-testid': 'match-card' },
-      h('a', { class: 'match-main', href: `/m/${m.publicId}`, 'data-link': '' },
+  // Only the latest reconciliation started on this phone is shown here. Older ones (and everyone
+  // else's) stay in the database and open only through their own link or QR code.
+  const pid = lastMatch.get();
+  if (!pid) return;
+  let d;
+  try { d = await api(`/matches/${pid}`, { editToken: editTokens.get(pid) }); } catch { return; }
+  const m = d.match;
+  latest.replaceChildren(h('h2', {}, 'آخر مطابقة'),
+    h('article', { class: `match-card ${m.status === 'open' ? 'is-open' : m.result}`, 'data-testid': 'match-card' },
+      h('a', { class: 'match-main', href: `/m/${pid}`, 'data-link': '' },
         h('div', { class: 'match-number' }, h('small', {}, 'رقم المطابقة'), h('strong', {}, `#${m.number}`)),
         h('div', { class: 'match-info' },
           h('strong', {}, m.branchName),
           h('span', { class: 'muted small' }, `${m.weekday} ${m.businessDate}`),
           statusChip(m),
-          m.status === 'open' && editTokens.get(m.publicId) ? h('span', { class: 'chip mine' }, 'متابعة من هذا الجهاز') : null),
-        h('img', { class: 'qr', src: `/api/matches/${m.publicId}/qr.svg`, alt: `رمز QR للمطابقة ${m.number}`, width: '84', height: '84', loading: 'lazy' })),
-      h('div', { class: 'match-actions' }, copyButton(m.publicId), h('a', { class: 'btn small ghost', href: `/m/${m.publicId}`, 'data-link': '' }, 'استعراض')))));
-  } catch (err) {
-    list.replaceChildren(h('p', { class: 'note bad' }, err.message));
-  }
+          d.canEdit ? h('span', { class: 'chip mine' }, 'متابعة من هذا الجهاز') : null),
+        h('img', { class: 'qr', src: `/api/matches/${pid}/qr.svg`, alt: `رمز QR للمطابقة ${m.number}`, width: '84', height: '84' })),
+      h('div', { class: 'match-actions' }, copyButton(pid), h('a', { class: 'btn small ghost', href: `/m/${pid}`, 'data-link': '' }, 'استعراض'))),
+    h('p', { class: 'muted small center' }, 'المطابقات السابقة تُفتح فقط من رابطها أو رمز QR الخاص بها.'));
 }
 
 function startNewMatch() {
@@ -87,6 +89,7 @@ function startNewMatch() {
     doneLabel: 'قراءة اليومية',
     onResult(res) {
       if (res.editToken) editTokens.set(res.publicId, res.editToken);
+      lastMatch.set(res.publicId);
       toast(`تم إنشاء المطابقة رقم ${res.number}`, 'ok');
       navigate(`/m/${res.publicId}`);
     },
@@ -197,7 +200,7 @@ async function renderMatch(pid) {
       h('div', { class: 'doc-head' }, h('h2', {}, doc.title), photoBtn(doc.kind, `تصوير ${doc.title}`, doc.hint, Boolean(r))),
       r ? h('table', { class: 'paper plain' }, h('tbody', {}, ...doc.rows.map(([f, ar]) => h('tr', {}, h('th', { scope: 'row' }, ar), valueCell(r, f, doc.kind)))))
         : h('p', { class: 'muted' }, 'لم يتم التصوير بعد.'),
-      doc.kind === 'deposit_receipt' && d.yesterday ? h('p', { class: 'muted small' }, 'تُقارن مع ', h('a', { href: `/m/${d.yesterday.publicId}`, 'data-link': '' }, `مطابقة أمس رقم ${d.yesterday.number}`)) : null,
+      doc.kind === 'deposit_receipt' && d.yesterday ? h('p', { class: 'muted small' }, `تُقارن مع رصيد الصندوق في مطابقة أمس رقم ${d.yesterday.number}.`) : null,
       photoLinks(r));
   };
 
@@ -256,7 +259,7 @@ function cashReview(d, pid, editToken, reload) {
 }
 
 function backLink() {
-  return h('nav', { class: 'crumbs' }, h('a', { href: '/', 'data-link': '' }, '→ آخر المطابقات'));
+  return h('nav', { class: 'crumbs' }, h('a', { href: '/', 'data-link': '' }, '→ الصفحة الرئيسية'));
 }
 
 route();
