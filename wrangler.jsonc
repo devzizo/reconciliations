@@ -17,8 +17,6 @@
     }
   ],
   "vars": {
-    // Workers free plan allows ~10 ms CPU per request; raise this on a paid plan.
-    "PASSWORD_PBKDF2_ITERATIONS": "30000",
     "SEED_DEMO_DATA": "false"
   },
   // Set ANTHROPIC_API_KEY with `npx wrangler secret put ANTHROPIC_API_KEY` to enable AI cash counting.

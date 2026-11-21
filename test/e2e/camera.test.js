@@ -1,133 +1,148 @@
-// Browser test of Stage 4 using Chromium's fake camera device.
-// Run with: npm run test:e2e   (needs Playwright + Chromium available on the machine)
+// Browser tests (Chromium with a fake camera): open home page → photograph the closing form → the
+// reconciliation is created from the form → photograph the rest → confirm cash → submit.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { startTestServer, USERS } from '../helpers/server.js';
+import { startTestServer } from '../helpers/server.js';
+import { fakeReader, TABUK_FORM, TABUK_Z, TABUK_BANK } from '../helpers/flow.js';
 
 const require = createRequire(import.meta.url);
 let chromium;
 try { ({ chromium } = require('playwright')); } catch { /* skipped below */ }
+const skip = !chromium && 'playwright not installed';
 
-const fakeCounter = {
-  provider: 'test-ai',
-  async analyze() { return { status: 'completed', model: 'test', counts: { note_100: 2, note_10: 3 }, issues: [] }; },
-};
-
+const reader = fakeReader();
+const counter = { provider: 'test-ai', async analyze() { return { status: 'completed', model: 'm', counts: { note_500: 1, note_100: 1, note_50: 1, note_10: 2 }, issues: [] }; } };
 let srv;
 let browser;
 before(async () => {
   if (!chromium) return;
-  srv = await startTestServer({ cashCounter: fakeCounter });
+  srv = await startTestServer({ documentReader: reader, cashCounter: counter });
   browser = await chromium.launch({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
 });
 after(async () => { await browser?.close(); await srv?.close(); });
 
-async function openCashStage(context, date) {
+async function newPage(opts = {}) {
+  const context = await browser.newContext({ permissions: ['camera'], ...opts });
   const page = await context.newPage();
-  page.on('pageerror', (e) => { throw e; });
-  await page.goto(srv.base);
-  await page.fill('input[name=username]', USERS.tabuk[0]);
-  await page.fill('input[name=password]', USERS.tabuk[1]);
-  await page.click('[data-testid=login]');
-  await page.fill('input[type=date]', date);
-  await page.click('[data-testid=open-day]');
-  await page.click('[data-testid=open-camera]');
+  page.errors = [];
+  page.on('pageerror', (e) => page.errors.push(e.message));
   return page;
 }
 
-test('live camera launches, capture uploads, review screen requires confirmation', { skip: !chromium && 'playwright not installed' }, async () => {
-  const context = await browser.newContext({ permissions: ['camera'] });
-  const page = await openCashStage(context, '2026-11-18');
-
-  // Camera is live: video has frames and the shutter is enabled.
+async function shoot(page, { frames = 1 } = {}) {
   await page.waitForFunction(() => document.querySelector('video.cam-video')?.videoWidth > 0);
-  await page.waitForSelector('button.shutter:not([disabled])');
-  assert.equal(await page.locator('.cash-view input[type=file]').count(), 0, 'no file input in Stage 4');
-  assert.equal(await page.locator('.cash-view img').count(), 0, 'no <img> that could be saved to Photos');
+  for (let i = 0; i < frames; i++) {
+    await page.waitForSelector('[data-testid=shutter]:not([disabled])');
+    await page.click('[data-testid=shutter]');
+    await page.waitForFunction((n) => document.querySelectorAll('.thumb').length === n, i + 1);
+  }
+  assert.equal(await page.locator('input[type=file]').count(), 0, 'no file input');
+  assert.equal(await page.locator('.cam-view img').count(), 0, 'no <img> of a captured frame');
+  await page.click('[data-testid=camera-done]');
+}
 
-  // Review is disabled until at least one photograph exists.
-  assert.equal(await page.isDisabled('[data-testid=review-count]'), true);
-  await page.click('button.shutter');
+test('full flow from the home page; figures are read-only; viewers get QR and link', { skip }, async () => {
+  const page = await newPage();
+  await page.goto(srv.base);
+  assert.equal(await page.getAttribute('html', 'dir'), 'rtl');
+  assert.doesNotMatch(await page.textContent('body'), /HOVEN/i, 'no logo on the open home page');
+  assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), 'rgb(246, 247, 251)');
+
+  reader.next('daily_closing_form', TABUK_FORM);
+  await page.click('[data-testid=new-match]');
+  await shoot(page);
+  await page.waitForURL(/\/m\/[\w-]+$/);
+  await page.waitForSelector('.big-number');
+  assert.equal(await page.textContent('.big-number'), '#1001');
+  assert.match(await page.textContent('.facts'), /تبوك.*الخميس.*2026-11-19/s);
+  assert.match(await page.textContent('.note.info'), /صحّح الكتابة بخط اليد/);
+  assert.equal(await page.locator('main input:not([type=checkbox]), main textarea').count(), 0, 'no editable figures');
+  assert.match(await page.textContent('[data-testid=checks]'), /مجموع طرق الدفع = صافي المبيعات/);
+  assert.match(await page.textContent('[data-testid=alerts]'), /لم يتم تصوير تقرير Z/);
+  assert.match(await page.textContent('[data-testid=share-url]'), /\/m\/[\w-]+$/);
+
+  const doc = async (kind, result, label) => {
+    reader.next(kind, result);
+    await page.click(`[data-testid=photo-${kind}]`);
+    await shoot(page);
+    await page.waitForSelector(`[data-doc=${kind}] ${label}`);
+  };
+  await doc('z_report', TABUK_Z, 'td.num');
+  await doc('bank_settlement', TABUK_BANK, 'td.num');
+  await doc('deposit_receipt', { fields: { amount: 475000 }, extras: { date: '2026-11-19' } }, 'td.num');
+  await doc('expense_invoice', { fields: { amount: 1500 }, extras: { vendor: 'بقالة' } }, '.expense-list');
+  // Expense total 15.00 vs 20.00 written → red with the difference.
+  assert.match(await page.textContent('[data-testid=checks] li.bad'), /الفرق: -5\.00 ريال/);
+
+  await page.click('[data-testid=photo-cash]');
+  await shoot(page, { frames: 2 });
+  await page.waitForSelector('[data-testid=cash-total]');
+  assert.equal(await page.textContent('[data-testid=cash-total]'), '670.00');
+  assert.equal(await page.isDisabled('[data-testid=confirm-cash]'), true);
+  await page.check('#confirm-cash');
+  await page.click('[data-testid=confirm-cash]');
+  await page.waitForSelector('text=النقد المعدود:');
+
+  page.once('dialog', (d) => d.accept());
+  await page.click('[data-testid=submit]');
+  await page.waitForSelector('.match-head .chip.bad');
+  assert.match(await page.textContent('.match-head'), /غير مطابقة/);
+
+  // Someone else opening the link: read-only, QR + copy link, no camera buttons.
+  const url = page.url();
+  const viewer = await (await browser.newContext()).newPage();
+  await viewer.goto(url);
+  await viewer.waitForSelector('.big-number');
+  assert.equal(await viewer.locator('[data-testid^=photo-]').count(), 0);
+  assert.equal(await viewer.locator('.share img.qr').count(), 1);
+
+  // Home page lists it with number, red status, QR and copy link.
+  await viewer.goto(srv.base);
+  await viewer.waitForSelector('[data-testid=match-card]');
+  const card = viewer.locator('[data-testid=match-card]').first();
+  assert.match(await card.textContent(), /#1001.*تبوك.*غير مطابقة/s);
+  assert.equal(await card.locator('img.qr').count(), 1);
+  assert.equal(await card.locator('[data-testid=copy-link]').count(), 1);
+  assert.deepEqual(page.errors, []);
+});
+
+for (const [name, init, text] of [
+  ['camera permission denied', () => { navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('denied', 'NotAllowedError')); }, 'تم رفض إذن الكاميرا'],
+  ['no camera', () => { navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('none', 'NotFoundError')); }, 'لا توجد كاميرا'],
+  ['browser without camera API', () => { Object.defineProperty(navigator, 'mediaDevices', { value: undefined }); }, 'الكاميرا غير مدعومة'],
+]) {
+  test(`${name} → blocked, no upload alternative`, { skip }, async () => {
+    const page = await newPage({ permissions: [] });
+    await page.addInitScript(init);
+    await page.goto(srv.base);
+    await page.click('[data-testid=new-match]');
+    await page.waitForSelector(`text=${text}`);
+    assert.equal(await page.isDisabled('[data-testid=shutter]'), true);
+    assert.equal(await page.isDisabled('[data-testid=camera-done]'), true);
+    assert.equal(await page.locator('input[type=file]').count(), 0);
+  });
+}
+
+test('camera stops mid-capture → capture and sending disabled', { skip }, async () => {
+  const page = await newPage();
+  await page.goto(srv.base);
+  await page.click('[data-testid=new-match]');
+  await page.waitForSelector('[data-testid=shutter]:not([disabled])');
+  await page.click('[data-testid=shutter]');
   await page.waitForSelector('.thumb canvas');
-  await page.click('button.shutter');
-  await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 2);
-
-  // Retake removes one.
-  await page.locator('.thumb button', { hasText: 'إعادة' }).first().click();
-  await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 1);
-
-  const imgs = (await srv.db.all('SELECT status FROM cash_images ORDER BY seq')).map((r) => r.status);
-  assert.deepEqual(imgs, ['retaken', 'active']);
-
-  await page.click('[data-testid=review-count]');
-  await page.waitForSelector('table.denoms');
-  // Camera released after capture.
-  assert.equal(await page.evaluate(() => document.querySelector('video.cam-video')?.srcObject ?? null), null);
-
-  const submit = page.locator('[data-testid=confirm-count-btn]');
-  assert.equal(await submit.isDisabled(), true, 'confirm disabled until checkbox ticked');
-  await page.fill('input[aria-label="عدد ١٠ ريال"]', '4');
-  await page.check('#confirm-count');
-  assert.match(await page.textContent('.grand-total'), /240\.00 ريال/);
-  await submit.click();
-  await page.waitForSelector('text=240.00 ريال');
-
-  const row = (await srv.db.get('SELECT * FROM cash_counts'));
-  assert.equal(row.total_halalas, 24000);
-  assert.deepEqual(JSON.parse(row.adjustments_json), [{ denomination: 'note_10', ai: 3, confirmed: 4 }]);
-  await context.close();
-});
-
-test('camera permission denied → capture and submission blocked', { skip: !chromium && 'playwright not installed' }, async () => {
-  const context = await browser.newContext();
-  await context.addInitScript(() => {
-    navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('Permission denied', 'NotAllowedError'));
-  });
-  const page = await openCashStage(context, '2026-11-17');
-  await page.waitForSelector('text=تم رفض إذن الكاميرا');
-  assert.equal(await page.isDisabled('button.shutter'), true);
-  assert.equal(await page.isDisabled('[data-testid=review-count]'), true);
-  assert.equal(await page.locator('input[type=file]').count(), 0, 'no upload fallback offered');
-  assert.equal((await srv.db.get("SELECT COUNT(*) AS n FROM capture_sessions cs JOIN reconciliations r ON r.id = cs.reconciliation_id WHERE r.business_date = '2026-11-17'")).n, 0);
-  await context.close();
-});
-
-test('no camera on the device → blocked', { skip: !chromium && 'playwright not installed' }, async () => {
-  const context = await browser.newContext();
-  await context.addInitScript(() => {
-    navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('Requested device not found', 'NotFoundError'));
-  });
-  const page = await openCashStage(context, '2026-11-16');
-  await page.waitForSelector('text=لا توجد كاميرا');
-  assert.equal(await page.isDisabled('button.shutter'), true);
-  await context.close();
-});
-
-test('browser without camera API → blocked', { skip: !chromium && 'playwright not installed' }, async () => {
-  const context = await browser.newContext();
-  await context.addInitScript(() => { Object.defineProperty(navigator, 'mediaDevices', { value: undefined }); });
-  const page = await openCashStage(context, '2026-11-15');
-  await page.waitForSelector('text=الكاميرا غير مدعومة');
-  assert.equal(await page.isDisabled('button.shutter'), true);
-  await context.close();
-});
-
-test('camera stops mid-capture → capture and review disabled', { skip: !chromium && 'playwright not installed' }, async () => {
-  const context = await browser.newContext({ permissions: ['camera'] });
-  const page = await openCashStage(context, '2026-11-14');
-  await page.waitForSelector('button.shutter:not([disabled])');
-  await page.click('button.shutter');
-  await page.waitForSelector('.thumb canvas');
-  assert.equal(await page.isDisabled('[data-testid=review-count]'), false);
-  // Simulate the camera being taken away (e.g. another app grabbed it).
-  await page.evaluate(() => {
-    const t = document.querySelector('video.cam-video').srcObject.getVideoTracks()[0];
-    t.stop();
-    t.dispatchEvent(new Event('ended'));
-  });
+  await page.evaluate(() => { const t = document.querySelector('video.cam-video').srcObject.getVideoTracks()[0]; t.stop(); t.dispatchEvent(new Event('ended')); });
   await page.waitForSelector('text=توقفت الكاميرا');
-  assert.equal(await page.isDisabled('[data-testid=review-count]'), true);
-  assert.equal(await page.isDisabled('button.shutter'), true);
-  await context.close();
+  assert.equal(await page.isDisabled('[data-testid=camera-done]'), true);
+});
+
+test('unreadable form header → told to photograph again', { skip }, async () => {
+  const page = await newPage();
+  await page.goto(srv.base);
+  reader.next('daily_closing_form', { fields: TABUK_FORM.fields, extras: { branch: 'tabuk', date: null } });
+  await page.click('[data-testid=new-match]');
+  await shoot(page);
+  await page.waitForSelector('.cam-result:not([hidden])');
+  assert.match(await page.textContent('.cam-result'), /تعذّر قراءة التاريخ/);
+  await page.waitForSelector('[data-testid=shutter]:not([disabled])'); // ready to photograph again
 });

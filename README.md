@@ -1,21 +1,13 @@
-# Branch Reconciliation
+# Daily closing reconciliation (مطابقة الإقفال اليومي)
 
-Daily cash reconciliation for retail branches, in five stages:
+Open web app (Arabic, right-to-left) for reconciling each branch's day. Everything comes from photographs
+taken with the live camera and read by AI — the daily closing form (branch and date included), Z report,
+bank settlement receipt, yesterday's cash deposit receipt, expense invoices and the cash itself. Figures
+can't be typed or edited; the app checks them against each other and shows matched (green) /
+unmatched (red, with the difference) and yellow alerts. The home page lists the latest reconciliations
+with their number, status, QR code and a copyable link.
 
-1. **Daily closing form** — upload the signed form (PDF or photo).
-2. **Z report** — upload the POS Z report.
-3. **Bank settlement receipt** — upload the mada / card terminal reconciliation receipt.
-
-   For stages 1–3, when AI is enabled the figures are read from the uploaded document (handwritten
-   Arabic or Western digits included) and filled into the form. The employee checks each value — the
-   ones that were hard to read are flagged — corrects anything wrong and saves. Corrections are recorded
-   in the audit trail. HEIC photos can't be read; JPEG, PNG, WebP and PDF can.
-4. **Physical cash count** — **live camera only.** Photograph the cash; AI suggests denomination
-   counts; the employee checks and confirms every line.
-5. **Summary** — expected vs counted cash and cross-checks between the documents, then submit.
-
-Stage 4's security design, limits and the optional native attested-capture channel are in
-[`docs/stage4-camera-capture.md`](docs/stage4-camera-capture.md).
+How it works, the rules, and the security limits (no accounts!): [`docs/camera-capture.md`](docs/camera-capture.md).
 
 ## Live deployment (Cloudflare Workers)
 
@@ -28,16 +20,11 @@ Cloudflare D1 database `reconciliations-db` (location hint: Eastern Europe, the 
 - Cash photographs and documents are stored in D1 as chunks (`file_chunks`), because R2 is not enabled
   on the account. The D1 free plan caps a database at 500 MB; once R2 is enabled, move file storage
   there (`src/fileStore.js` is the single place to change).
-- The account is on the Workers free plan (≈10 ms CPU per request), so new password hashes use
-  PBKDF2 with 30,000 iterations (`PASSWORD_PBKDF2_ITERATIONS` in `wrangler.jsonc`). Raise it on a paid plan;
-  existing hashes keep working because the iteration count is stored with each hash.
-- There are no demo accounts in production. Create users with:
+- There are no user accounts. Branches (the AI matches the branch written on the form against this list):
 
 ```bash
-node scripts/create-user.mjs --username jeddah.employee --name "Jeddah Employee" --role employee --branch jeddah --branch-name Jeddah --branch-name-ar جدة
+node scripts/create-branch.mjs --id jeddah --name Jeddah --name-ar جدة
 ```
-
-  (prints a random password; users can change it from **Change password** in the app).
 
 Deploy changes:
 
@@ -55,8 +42,7 @@ Enable AI cash counting:
 npx wrangler secret put ANTHROPIC_API_KEY
 ```
 
-Smoke-test a deployment end to end (`BASE`, `EMP_USER`/`EMP_PASS`, `OTHER_USER`/`OTHER_PASS` for an
-employee of another branch, `MGR_USER`/`MGR_PASS`):
+Smoke-test a deployment (`BASE=https://…`):
 
 ```bash
 node scripts/smoke.mjs
@@ -88,20 +74,13 @@ Then open `https://<your-computer-ip>:8443` on the phone (accept the self-signed
 In production, put it behind an HTTPS reverse proxy with `TRUST_PROXY=1` (HTTPS is enforced when
 `NODE_ENV=production`).
 
-Demo accounts are created on first start — **change them before real use**:
-
-| Username | Password | Role |
-|---|---|---|
-| `tabuk.employee` | `change-me-tabuk` | Employee, Tabuk branch |
-| `najran.employee` | `change-me-najran` | Employee, Najran branch |
-| `finance.manager` | `change-me-manager` | Manager (all branches, audit trail) |
-
-Set `SEED_DEMO_DATA=false` to skip them.
+Two demo branches (Tabuk, Najran) are created locally on first start. Reading photos needs an AI key (below) —
+without it no reconciliation can be created.
 
 ### AI cash counting
 
-Set `ANTHROPIC_API_KEY` to enable Claude-based denomination counting and reading of figures from the stage 1–3 documents (`CASH_AI_MODEL`, default
-`claude-opus-5-5`). Without it the review screen starts at zero and employees count by hand.
+Set `ANTHROPIC_API_KEY` to enable reading the photographed documents and counting the cash (`CASH_AI_MODEL`, default
+`claude-opus-5-5`). Without it nothing can be read, so no reconciliation can be created.
 
 ### Configuration
 
@@ -116,7 +95,6 @@ Set `ANTHROPIC_API_KEY` to enable Claude-based denomination counting and reading
 | `CAPTURE_MAX_IMAGES` | `10` | Photographs per capture session |
 | `CAPTURE_MAX_BYTES` | `5242880` | Max size of one photograph |
 | `CAPTURE_MIN_SHORT_SIDE` | `480` | Minimum photograph resolution (px) |
-| `DOCUMENT_MAX_BYTES` | `15728640` | Max size of a Stage 1–3 document |
 
 ## Tests
 
@@ -129,6 +107,6 @@ npm run test:e2e
 ```
 
 The end-to-end tests skip themselves if Playwright isn't installed (`npm i -D playwright` and
-`npx playwright install chromium`). They drive Chromium with a fake camera device: camera launches,
-capture → retake → review → confirm, permission denied, no camera, unsupported browser, and the
-camera stopping mid-capture.
+`npx playwright install chromium`). They drive Chromium with a fake camera device through the whole day — new reconciliation from the
+photographed form, every document, cash confirmation, submission, the public view and home page — plus
+camera denied / missing / unsupported / stopping, and an unreadable form header.

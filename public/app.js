@@ -1,362 +1,262 @@
-import { h, api, setAuthToken, hasAuthToken, formatSar, parseAmount, toast } from './ui.js';
-import { openCashCount } from './cash-camera.js';
+import { h, api, copyText, editTokens, formatSar, toast } from './ui.js';
+import { openCamera } from './camera.js';
 
 const root = document.getElementById('app');
-let me = null;
-const suggestions = new Map(); // `${reconciliationId}:${stage}` → AI reading awaiting review
 
-window.addEventListener('auth-expired', () => { me = null; renderLogin('انتهت الجلسة. سجّل الدخول مرة أخرى.'); });
+// ------------------------------------------------------------------ routing
 
-const WEEKDAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
-const dayName = (iso) => WEEKDAYS[new Date(`${iso}T12:00:00Z`).getUTCDay()];
-const STATUS = { open: 'مفتوحة', submitted: 'مُرسلة' };
+function navigate(path, { replace = false } = {}) {
+  if (replace) history.replaceState(null, '', path); else history.pushState(null, '', path);
+  route();
+}
+window.addEventListener('popstate', route);
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[data-link]');
+  if (!a || e.metaKey || e.ctrlKey) return;
+  e.preventDefault();
+  navigate(a.getAttribute('href'));
+});
 
-async function boot() {
-  if (!hasAuthToken()) return renderLogin();
-  try {
-    me = await api('/me');
-    renderHome();
-  } catch {
-    renderLogin();
-  }
+function route() {
+  const m = /^\/m\/([\w-]+)$/.exec(location.pathname);
+  if (m) return renderMatch(m[1]);
+  return renderHome();
 }
 
-// ------------------------------------------------------------------ login & account
+const shareUrl = (pid) => `${location.origin}/m/${pid}`;
 
-function renderLogin(message) {
-  const user = h('input', { name: 'username', autocomplete: 'username', required: true, autocapitalize: 'off', dir: 'ltr' });
-  const pass = h('input', { name: 'password', type: 'password', autocomplete: 'current-password', required: true, dir: 'ltr' });
-  const form = h('form', { class: 'card narrow' },
-    h('div', { class: 'brand' }, 'HOVEN'),
-    h('h1', {}, 'التسوية اليومية للفروع'),
-    message ? h('p', { class: 'note warn' }, message) : null,
-    h('label', {}, 'اسم المستخدم', user),
-    h('label', {}, 'كلمة المرور', pass),
-    h('button', { class: 'btn primary', type: 'submit', 'data-testid': 'login' }, 'تسجيل الدخول'));
-  form.addEventListener('submit', async (e) => {
+function statusChip(item, { large = false } = {}) {
+  if (item.status === 'open') return h('span', { class: `chip pending ${large ? 'large' : ''}` }, 'قيد الإعداد');
+  return item.result === 'matched'
+    ? h('span', { class: `chip ok ${large ? 'large' : ''}` }, '✓ مطابقة')
+    : h('span', { class: `chip bad ${large ? 'large' : ''}` }, '✗ غير مطابقة');
+}
+
+function copyButton(pid) {
+  const btn = h('button', { class: 'btn small', type: 'button', 'data-testid': 'copy-link' }, '🔗 نسخ الرابط');
+  btn.addEventListener('click', async (e) => {
     e.preventDefault();
-    try {
-      const res = await api('/auth/login', { method: 'POST', body: { username: user.value, password: pass.value } });
-      setAuthToken(res.token);
-      me = await api('/me');
-      renderHome();
-    } catch (err) { toast(err.message, 'error'); }
+    e.stopPropagation();
+    toast(await copyText(shareUrl(pid)) ? 'تم نسخ الرابط.' : shareUrl(pid), 'ok');
   });
-  root.replaceChildren(form);
+  return btn;
 }
 
-function topBar() {
-  return h('header', { class: 'topbar' },
-    h('strong', { class: 'brand small' }, 'HOVEN'),
-    h('span', { class: 'muted' }, me.user.displayName),
-    h('span', { class: 'top-actions' },
-      h('button', { class: 'btn ghost small', type: 'button', onclick: renderChangePassword }, 'تغيير كلمة المرور'),
-      h('button', { class: 'btn ghost small', type: 'button', onclick: async () => {
-        try { await api('/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
-        setAuthToken(null); renderLogin();
-      } }, 'خروج')));
-}
-
-function renderChangePassword() {
-  const current = h('input', { type: 'password', autocomplete: 'current-password', required: true, dir: 'ltr' });
-  const next = h('input', { type: 'password', autocomplete: 'new-password', required: true, minlength: '10', dir: 'ltr' });
-  const again = h('input', { type: 'password', autocomplete: 'new-password', required: true, minlength: '10', dir: 'ltr' });
-  const form = h('form', { class: 'card narrow' },
-    h('h2', {}, 'تغيير كلمة المرور'),
-    h('label', {}, 'كلمة المرور الحالية', current),
-    h('label', {}, 'كلمة المرور الجديدة (10 أحرف على الأقل)', next),
-    h('label', {}, 'أعد كتابة كلمة المرور الجديدة', again),
-    h('div', { class: 'actions' },
-      h('button', { class: 'btn ghost', type: 'button', onclick: renderHome }, 'إلغاء'),
-      h('button', { class: 'btn primary', type: 'submit' }, 'حفظ')));
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (next.value !== again.value) return toast('كلمتا المرور الجديدتان غير متطابقتين.', 'error');
-    try {
-      await api('/auth/password', { method: 'POST', body: { currentPassword: current.value, newPassword: next.value } });
-      toast('تم تغيير كلمة المرور.', 'ok');
-      renderHome();
-    } catch (err) { toast(err.message, 'error'); }
-  });
-  root.replaceChildren(topBar(), form);
-}
-
-// ------------------------------------------------------------------ home
+// ------------------------------------------------------------------ home (open to everyone)
 
 async function renderHome() {
-  const { reconciliations } = await api('/reconciliations');
-  const dateInput = h('input', { type: 'date', value: new Date().toISOString().slice(0, 10), required: true });
-  const createForm = me.user.role === 'employee'
-    ? h('form', { class: 'card row' }, h('label', {}, 'تاريخ اليوم', dateInput), h('button', { class: 'btn primary', type: 'submit', 'data-testid': 'open-day' }, 'فتح اليوم'))
-    : null;
-  createForm?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    try {
-      const { reconciliation } = await api('/reconciliations', { method: 'POST', body: { businessDate: dateInput.value } });
-      renderReconciliation(reconciliation.id);
-    } catch (err) { toast(err.message, 'error'); }
-  });
+  document.title = 'مطابقة الإقفال اليومي';
+  const list = h('div', { class: 'match-list', 'aria-busy': 'true' }, h('p', { class: 'muted center' }, 'جاري التحميل…'));
+  const start = h('button', { class: 'btn primary hero-btn', type: 'button', 'data-testid': 'new-match' }, '＋ مطابقة جديدة');
+  start.addEventListener('click', startNewMatch);
   root.replaceChildren(
-    topBar(),
-    createForm,
-    h('section', { class: 'card' }, h('h2', {}, 'الأيام السابقة'),
-      reconciliations.length === 0 ? h('p', { class: 'muted' }, 'لا توجد تسويات بعد.') : h('ul', { class: 'list' },
-        ...reconciliations.map((r) => h('li', {},
-          h('button', { class: 'link', type: 'button', onclick: () => renderReconciliation(r.id) }, `${dayName(r.businessDate)} ${r.businessDate} · ${r.branchId}`),
-          h('span', { class: `pill ${r.status}` }, STATUS[r.status] ?? r.status))))),
-  );
-}
+    h('section', { class: 'hero' },
+      h('h1', {}, 'مطابقة الإقفال اليومي'),
+      h('p', {}, 'صوّر اليومية بالجوال، ويقرأ النظام الأرقام والفرع والتاريخ ويطابقها مع تقرير Z وإيصال البنك والنقد.'),
+      start,
+      h('ol', { class: 'steps' },
+        h('li', {}, h('span', {}, '١'), 'صوّر اليومية'),
+        h('li', {}, h('span', {}, '٢'), 'صوّر التقارير والإيصالات'),
+        h('li', {}, h('span', {}, '٣'), 'عدّ النقد بالكاميرا'))),
+    h('section', { class: 'latest' }, h('h2', {}, 'آخر المطابقات'), list));
 
-// ------------------------------------------------------------------ stage definitions
-
-// Same sections, order and wording as the paper form FIN-DCF-01.
-const CLOSING_FORM = [
-  { title: 'المبيعات الإجمالية والتسويات', en: 'SALES SUMMARY & ADJUSTMENTS', rows: [
-    ['gross_sales', 'إجمالي المبيعات', 'Gross Sales'],
-    ['returns', 'المرتجعات', 'Returns / Refunds'],
-    ['net_sales', 'صافي المبيعات', 'Net Sales'],
-  ] },
-  { title: 'تفاصيل وسائل الدفع (POS & Online)', en: 'PAYMENT METHODS BREAKDOWN', payments: true, rows: [
-    ['mada', 'شبكة (مدى / POS)', 'Mada / POS Terminal'],
-    ['mastercard', 'ماستر كارد', 'Mastercard'],
-    ['visa', 'فيزا', 'Visa'],
-    ['tamara', 'تمارا', 'Tamara'],
-    ['tabby', 'تابي', 'Tabby'],
-    ['cash_sales', 'كاش / نقدي', 'Cash Sales'],
-    ['overage_shortage', 'الزيادة / العجز', 'Overage / Shortage'],
-  ] },
-  { title: 'حركة صندوق النقدية (الكاش)', en: 'CASH MOVEMENT & PETTY CASH', rows: [
-    ['opening_cash_balance', 'رصيد الصندوق أول اليوم', 'Opening Cash Balance'],
-    ['cash_inflow', 'الوارد (إيداعات / نقدي)', 'Cash Inflow'],
-    ['cash_outflow', 'المنصرف (مصاريف / استرجاع)', 'Cash Outflow / Expenses'],
-    ['closing_cash_balance', 'رصيد الصندوق آخر اليوم', 'Closing Cash Balance'],
-  ] },
-];
-const PAYMENT_FIELDS = ['mada', 'mastercard', 'visa', 'tamara', 'tabby', 'cash_sales'];
-
-const STAGES = [
-  { key: 'daily_closing_form', n: 1, title: 'نموذج الإقفال اليومي', docName: 'اليومية', sections: CLOSING_FORM },
-  { key: 'z_report', n: 2, title: 'تقرير Z', docName: 'تقرير Z', sections: [{ rows: [
-    ['gross_sales', 'إجمالي المبيعات', 'Gross Sales'], ['discount', 'الخصم', 'Discount'], ['net_sales', 'صافي المبيعات', 'Total Net Sales'],
-    ['cash', 'نقدي', 'Cash'], ['mada', 'مدى', 'MADA'], ['visa', 'فيزا', 'VISA'],
-  ] }] },
-  { key: 'bank_settlement', n: 3, title: 'إيصال تسوية البنك', docName: 'إيصال البنك', sections: [{ rows: [
-    ['mada_total', 'إجمالي مدى', 'mada'], ['visa_total', 'إجمالي فيزا', 'Visa'], ['mastercard_total', 'إجمالي ماستر كارد', 'Mastercard'],
-    ['transaction_count', 'عدد العمليات', 'Count'],
-  ] }] },
-];
-
-/** Same rules as the server: gross − returns = net, and payment methods = net. */
-function closingChecks(v) {
-  const n = (k) => v[k] ?? 0;
-  const missing = v.gross_sales === null || v.net_sales === null;
-  const expectedNet = n('gross_sales') - n('returns');
-  const payments = PAYMENT_FIELDS.reduce((a, k) => a + n(k), 0);
-  return [
-    { ok: !missing && expectedNet === n('net_sales'), text: missing ? 'أدخل إجمالي المبيعات وصافي المبيعات'
-      : `إجمالي المبيعات − المرتجعات = ${formatSar(expectedNet)}  ${expectedNet === n('net_sales') ? '=' : '≠'}  صافي المبيعات ${formatSar(n('net_sales'))}` },
-    { ok: !missing && payments === n('net_sales'), text: `مجموع طرق الدفع = ${formatSar(payments)}  ${payments === n('net_sales') ? '=' : '≠'}  صافي المبيعات ${formatSar(n('net_sales'))}` },
-  ];
-}
-
-// ------------------------------------------------------------------ photo → JPEG
-
-/** Phone photos (including iPhone HEIC) are converted to a JPEG of reasonable size before upload. */
-async function normaliseImage(file) {
-  if (!file.type.startsWith('image/') || file.type === 'image/gif') return file;
-  const url = URL.createObjectURL(file);
   try {
-    const img = await new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = reject; i.src = url; });
-    const scale = Math.min(1, 2400 / Math.max(img.naturalWidth, img.naturalHeight));
-    const c = document.createElement('canvas');
-    c.width = Math.round(img.naturalWidth * scale);
-    c.height = Math.round(img.naturalHeight * scale);
-    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    const blob = await new Promise((resolve) => c.toBlob(resolve, 'image/jpeg', 0.9));
-    return blob ? new File([blob], (file.name || 'photo').replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }) : file;
-  } catch {
-    return file;
-  } finally {
-    URL.revokeObjectURL(url);
+    const { matches } = await api('/matches?limit=30');
+    list.removeAttribute('aria-busy');
+    if (!matches.length) return list.replaceChildren(h('p', { class: 'muted center' }, 'لا توجد مطابقات بعد.'));
+    list.replaceChildren(...matches.map((m) => h('article', { class: `match-card ${m.status === 'open' ? 'is-open' : m.result}`, 'data-testid': 'match-card' },
+      h('a', { class: 'match-main', href: `/m/${m.publicId}`, 'data-link': '' },
+        h('div', { class: 'match-number' }, h('small', {}, 'رقم المطابقة'), h('strong', {}, `#${m.number}`)),
+        h('div', { class: 'match-info' },
+          h('strong', {}, m.branchName),
+          h('span', { class: 'muted small' }, `${m.weekday} ${m.businessDate}`),
+          statusChip(m),
+          m.status === 'open' && editTokens.get(m.publicId) ? h('span', { class: 'chip mine' }, 'متابعة من هذا الجهاز') : null),
+        h('img', { class: 'qr', src: `/api/matches/${m.publicId}/qr.svg`, alt: `رمز QR للمطابقة ${m.number}`, width: '84', height: '84', loading: 'lazy' })),
+      h('div', { class: 'match-actions' }, copyButton(m.publicId), h('a', { class: 'btn small ghost', href: `/m/${m.publicId}`, 'data-link': '' }, 'استعراض')))));
+  } catch (err) {
+    list.replaceChildren(h('p', { class: 'note bad' }, err.message));
   }
 }
 
-// ------------------------------------------------------------------ day screen
-
-async function renderReconciliation(id) {
-  let data;
-  try { data = await api(`/reconciliations/${id}`); } catch (err) { toast(err.message, 'error'); return renderHome(); }
-  const { reconciliation: rec, stages, summary } = data;
-  const editable = rec.status === 'open';
-
-  const docStage = (s) => {
-    const st = stages[s.key];
-    const sugKey = `${id}:${s.key}`;
-    const sug = suggestions.get(sugKey);
-    const isClosing = s.key === 'daily_closing_form';
-    const fmt = (f, v) => (v === null || v === undefined ? '' : (f === 'transaction_count' ? String(v) : formatSar(v)));
-
-    // ---- document (one per day)
-    const readDocument = async (docId) => {
-      busy.hidden = false;
-      try {
-        const { extraction } = await api(`/reconciliations/${id}/documents/${docId}/extract`, { method: 'POST' });
-        suggestions.set(sugKey, extraction);
-        if (extraction.status === 'completed') toast('تمت قراءة الأرقام. راجع كل رقم مقابل المستند ثم احفظ.', 'ok');
-        else toast(extraction.issues[0] ?? 'تعذّرت القراءة. أدخل الأرقام يدويًا.', 'warn');
-      } catch (err) { toast(err.message, 'error'); }
-      renderReconciliation(id);
-    };
-    const upload = async (picked) => {
-      if (!picked) return;
-      if (st.document && !window.confirm(`يوجد ${s.docName} مرفوعة لهذا اليوم. سيتم استبدالها بالملف الجديد. متابعة؟`)) return;
-      busy.hidden = false;
-      busy.textContent = 'جاري رفع الملف…';
-      const file = await normaliseImage(picked);
-      const fd = new FormData();
-      fd.append('file', file);
-      let uploaded;
-      try { uploaded = await api(`/reconciliations/${id}/documents?type=${s.key}`, { method: 'POST', formData: fd }); }
-      catch (err) { busy.hidden = true; toast(err.message, 'error'); return; }
-      suggestions.delete(sugKey);
-      if (me.features.aiReading) { busy.textContent = 'جاري قراءة الأرقام من المستند…'; return readDocument(uploaded.documentId); }
-      toast('تم رفع الملف.', 'ok');
-      renderReconciliation(id);
-    };
-    // Camera button opens the phone camera directly; the file button accepts PDF or a saved image.
-    const cameraInput = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, 'data-testid': `camera-${s.key}` });
-    const fileInput = h('input', { type: 'file', accept: 'application/pdf,image/*', hidden: true, 'data-testid': `file-${s.key}` });
-    cameraInput.addEventListener('change', () => upload(cameraInput.files[0]));
-    fileInput.addEventListener('change', () => upload(fileInput.files[0]));
-    const busy = h('p', { class: 'busy', hidden: true, role: 'status' }, 'جاري قراءة الأرقام من المستند…');
-
-    const docBox = h('div', { class: 'doc-box' },
-      st.document
-        ? h('p', { class: 'doc-name' }, `📄 ${st.document.name || s.docName} · ${(st.document.size / 1024).toFixed(0)} ك.ب`)
-        : h('p', { class: 'muted' }, `لم تُرفع ${s.docName} لهذا اليوم بعد.`),
-      editable ? h('div', { class: 'doc-actions' },
-        h('button', { class: 'btn primary', type: 'button', onclick: () => cameraInput.click() }, st.document ? `📷 إعادة تصوير ${s.docName}` : `📷 تصوير ${s.docName} بالجوال`),
-        h('button', { class: 'btn', type: 'button', onclick: () => fileInput.click() }, st.document ? '📁 استبدال بملف' : '📁 رفع ملف (PDF أو صورة)'),
-        st.document && me.features.aiReading ? h('button', { class: 'btn ghost', type: 'button', onclick: () => readDocument(st.document.id) }, '🔍 قراءة الأرقام') : null,
-        cameraInput, fileInput) : null,
-      busy);
-
-    // ---- figures, laid out like the paper form
-    const inputs = new Map();
-    const tables = s.sections.map((sec) => {
-      const rows = sec.rows.map(([f, ar, en]) => {
-        const suggested = sug && sug.status === 'completed' && f in sug.fields;
-        const low = suggested && sug.lowConfidence.includes(f);
-        const input = h('input', { name: f, inputmode: 'decimal', dir: 'ltr', disabled: !editable, 'aria-label': ar,
-          value: suggested ? fmt(f, sug.fields[f]) : fmt(f, st.figures?.[f]),
-          class: suggested ? (low ? 'suggested low' : 'suggested') : null, title: low ? 'قراءة غير مؤكدة — راجع هذا الرقم بعناية' : null });
-        inputs.set(f, input);
-        return h('tr', {}, h('th', { scope: 'row' }, ar, low ? ' ⚠' : '', h('span', { class: 'en' }, en)), h('td', {}, input));
-      });
-      if (sec.payments) {
-        const totalCell = h('td', { class: 'num total', 'data-testid': 'payments-total' });
-        rows.push(h('tr', { class: 'sum-row' }, h('th', { scope: 'row' }, 'مجموع طرق الدفع'), totalCell));
-        sec.totalCell = totalCell;
-      }
-      return h('div', { class: 'form-section' },
-        sec.title ? h('div', { class: 'section-bar' }, h('span', {}, sec.title), h('span', { class: 'en' }, sec.en)) : null,
-        h('table', { class: 'paper' }, h('tbody', {}, ...rows)));
-    });
-
-    let notes = null;
-    if (isClosing) {
-      notes = h('textarea', { name: 'notes', rows: '2', disabled: !editable, 'aria-label': 'ملاحظات' });
-      notes.value = st.figures?.notes ?? '';
-    }
-    const checksBox = isClosing ? h('div', { class: 'checks', 'data-testid': 'checks' }) : null;
-    const saveBtn = editable ? h('button', { class: 'btn primary', type: 'submit', 'data-testid': `save-${s.key}` }, sug ? 'راجعت الأرقام — حفظ' : 'حفظ الأرقام') : null;
-
-    const refresh = () => {
-      if (!isClosing) return;
-      const vals = {};
-      let valid = true;
-      for (const [f, input] of inputs) {
-        const v = parseAmount(input.value);
-        input.classList.toggle('invalid', v === undefined);
-        if (v === undefined) valid = false;
-        vals[f] = v ?? null;
-      }
-      const payments = PAYMENT_FIELDS.reduce((a, k) => a + (vals[k] ?? 0), 0);
-      for (const sec of s.sections) if (sec.totalCell) sec.totalCell.textContent = formatSar(payments);
-      const checks = closingChecks(vals);
-      checksBox.replaceChildren(...checks.map((c) => h('p', { class: c.ok ? 'ok' : 'bad' }, `${c.ok ? '✓' : '✗'} ${c.text}`)));
-      if (saveBtn) saveBtn.disabled = !valid || !checks.every((c) => c.ok);
-    };
-    for (const input of inputs.values()) input.addEventListener('input', refresh);
-
-    const figForm = h('form', { class: 'figures' }, ...tables,
-      isClosing ? h('div', { class: 'form-section' }, h('div', { class: 'section-bar' }, h('span', {}, 'ملاحظات'), h('span', { class: 'en' }, 'NOTES / REMARKS')), notes) : null,
-      checksBox,
-      saveBtn ? h('div', { class: 'actions' }, saveBtn) : null);
-    figForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const body = Object.fromEntries(new FormData(figForm).entries());
-      if (sug?.extractionId) body.extractionId = sug.extractionId;
-      try {
-        await api(`/reconciliations/${id}/stages/${s.key}`, { method: 'PUT', body });
-        suggestions.delete(sugKey);
-        toast('تم الحفظ.', 'ok');
-        renderReconciliation(id);
-      } catch (err) { toast(err.message, 'error'); }
-    });
-
-    const reviewNote = sug ? h('div', { class: `note ${sug.status === 'completed' ? '' : 'warn'}` },
-      h('p', {}, sug.status === 'completed'
-        ? 'الأرقام المظللة قرأها الذكاء الاصطناعي من المستند. قارن كل رقم بالمستند وصحّح أي خطأ ثم احفظ. علامة ⚠ تعني أن الرقم صعب القراءة.'
-        : 'تعذّرت قراءة المستند آليًا. أدخل الأرقام يدويًا.'),
-      sug.issues.length ? h('ul', { class: 'issues' }, ...sug.issues.map((i) => h('li', {}, i))) : null,
-      h('button', { class: 'btn ghost small', type: 'button', onclick: () => { suggestions.delete(sugKey); renderReconciliation(id); } }, 'تجاهل الأرقام المقروءة')) : null;
-
-    const section = h('section', { class: `card stage ${st.complete ? 'done' : ''}`, 'data-stage': s.key },
-      h('h3', {}, `${s.n}. ${s.title}`, h('span', { class: 'check' }, st.complete ? '✓' : '')),
-      docBox, reviewNote, figForm);
-    refresh();
-    return section;
-  };
-
-  const cash = stages.cash_count;
-  const cashCard = h('section', { class: `card stage ${cash.complete ? 'done' : ''}`, 'data-stage': 'cash_count' },
-    h('h3', {}, '4. عدّ النقد', h('span', { class: 'check' }, cash.complete ? '✓' : '')),
-    cash.confirmed
-      ? h('div', {}, h('p', {}, h('strong', {}, `${cash.confirmed.total} ريال`), ` · تم التأكيد ${new Date(cash.confirmed.confirmedAt).toLocaleString('ar-SA')}`),
-        cash.confirmed.adjustments.length ? h('p', { class: 'muted small' }, `تم تصحيح ${cash.confirmed.adjustments.length} فئة عن عدّ الذكاء الاصطناعي.`) : null)
-      : h('div', {},
-        h('p', { class: 'muted small' }, 'صوّر النقد بالكاميرا المباشرة. لا يمكن استخدام صور من المعرض.'),
-        editable && me.user.role === 'employee'
-          ? h('button', { class: 'btn primary', type: 'button', 'data-testid': 'open-camera', onclick: () => openCashCount({ root, recon: { ...rec, id }, onClose: () => renderReconciliation(id) }) }, '📷 فتح الكاميرا لعدّ النقد')
-          : null));
-
-  const diffLine = (label, v) => h('tr', {}, h('td', {}, label), h('td', { class: `num ${v ? 'bad' : ''}`, dir: 'ltr' }, formatSar(v)));
-  const allDone = Object.values(stages).every((s) => s.complete);
-  const summaryCard = h('section', { class: 'card stage', 'data-stage': 'summary' },
-    h('h3', {}, '5. الملخص'),
-    h('table', { class: 'summary' },
-      h('tr', {}, h('td', {}, 'رصيد الصندوق المتوقع (من اليومية)'), h('td', { class: 'num', dir: 'ltr' }, formatSar(summary.expectedClosingCashHalalas))),
-      h('tr', {}, h('td', {}, 'النقد المعدود'), h('td', { class: 'num', dir: 'ltr' }, formatSar(summary.countedCashHalalas))),
-      diffLine('فرق النقد', summary.cashVarianceHalalas),
-      diffLine('نقدي تقرير Z − كاش اليومية', summary.zReportVsFormCashHalalas),
-      diffLine('مدى البنك − مدى اليومية', summary.bankVsFormMadaHalalas)),
-    editable && me.user.role === 'employee'
-      ? h('button', { class: 'btn primary', type: 'button', disabled: !allDone, onclick: async () => {
-        if (!window.confirm('بعد الإرسال لا يمكن تعديل تسوية هذا اليوم. متابعة؟')) return;
-        try { await api(`/reconciliations/${id}/submit`, { method: 'POST' }); toast('تم إرسال التسوية.', 'ok'); renderReconciliation(id); } catch (err) { toast(err.message, 'error'); }
-      } }, 'إرسال التسوية')
-      : h('p', { class: 'muted' }, `الحالة: ${STATUS[rec.status] ?? rec.status}`));
-
-  root.replaceChildren(
-    topBar(),
-    h('div', { class: 'crumbs' }, h('button', { class: 'link', type: 'button', onclick: renderHome }, '→ كل الأيام')),
-    h('div', { class: 'card day-head' },
-      h('div', {}, h('span', { class: 'muted' }, 'الفرع: '), h('strong', {}, rec.branchNameAr || rec.branchName)),
-      h('div', {}, h('span', { class: 'muted' }, 'اليوم: '), h('strong', {}, dayName(rec.businessDate))),
-      h('div', {}, h('span', { class: 'muted' }, 'التاريخ: '), h('strong', { dir: 'ltr' }, rec.businessDate)),
-      h('span', { class: `pill ${rec.status}` }, STATUS[rec.status] ?? rec.status)),
-    ...STAGES.map(docStage), cashCard, summaryCard);
+function startNewMatch() {
+  openCamera({
+    root, kind: 'daily_closing_form', title: 'تصوير اليومية',
+    subtitle: 'سيُقرأ الفرع والتاريخ والأرقام من النموذج.',
+    hint: 'ضع النموذج كاملًا داخل الإطار بإضاءة جيدة وبدون ظل، وتأكد أن الفرع والتاريخ مكتوبان بوضوح.',
+    doneLabel: 'قراءة اليومية',
+    onResult(res) {
+      if (res.editToken) editTokens.set(res.publicId, res.editToken);
+      toast(`تم إنشاء المطابقة رقم ${res.number}`, 'ok');
+      navigate(`/m/${res.publicId}`);
+    },
+    onClose: () => renderHome(),
+  });
 }
 
-boot();
+// ------------------------------------------------------------------ reconciliation page
+
+const CLOSING_FORM = [
+  { title: 'المبيعات الإجمالية والتسويات', en: 'SALES SUMMARY & ADJUSTMENTS', rows: [
+    ['gross_sales', 'إجمالي المبيعات', 'Gross Sales'], ['returns', 'المرتجعات', 'Returns / Refunds'], ['net_sales', 'صافي المبيعات', 'Net Sales']] },
+  { title: 'تفاصيل وسائل الدفع (POS & Online)', en: 'PAYMENT METHODS BREAKDOWN', rows: [
+    ['mada', 'شبكة (مدى / POS)', 'Mada / POS Terminal'], ['mastercard', 'ماستر كارد', 'Mastercard'], ['visa', 'فيزا', 'Visa'], ['tamara', 'تمارا', 'Tamara'],
+    ['tabby', 'تابي', 'Tabby'], ['cash_sales', 'كاش / نقدي', 'Cash Sales'], ['overage_shortage', 'الزيادة / العجز', 'Overage / Shortage']] },
+  { title: 'حركة صندوق النقدية (الكاش)', en: 'CASH MOVEMENT & PETTY CASH', rows: [
+    ['opening_cash_balance', 'رصيد الصندوق أول اليوم', 'Opening Cash Balance'], ['cash_inflow', 'الوارد (إيداعات / نقدي)', 'Cash Inflow'],
+    ['cash_outflow', 'المنصرف (مصاريف / استرجاع)', 'Cash Outflow / Expenses'], ['closing_cash_balance', 'رصيد الصندوق آخر اليوم', 'Closing Cash Balance']] },
+];
+const DOCS = [
+  { kind: 'z_report', title: 'تقرير Z', hint: 'صوّر الإيصال كاملًا من الأعلى إلى الأسفل. إذا كان هناك أكثر من تقرير Z فضعها جنبًا إلى جنب.',
+    rows: [['gross_sales', 'إجمالي المبيعات'], ['discount', 'الخصم'], ['net_sales', 'صافي المبيعات'], ['cash', 'نقدي'], ['mada', 'مدى'], ['visa', 'فيزا']] },
+  { kind: 'bank_settlement', title: 'إيصال تسوية البنك', hint: 'صوّر إيصال الموازنة من جهاز الشبكة بحيث تظهر الإجماليات.',
+    rows: [['mada_total', 'إجمالي مدى'], ['visa_total', 'إجمالي فيزا'], ['mastercard_total', 'إجمالي ماستر كارد']] },
+  { kind: 'deposit_receipt', title: 'إيصال إيداع الكاش (يومية أمس)', hint: 'صوّر إيصال إيداع نقدية يوم أمس في البنك.', rows: [['amount', 'المبلغ المودع']] },
+];
+
+async function renderMatch(pid) {
+  const editToken = editTokens.get(pid);
+  let d;
+  try {
+    d = await api(`/matches/${pid}`, { editToken });
+  } catch (err) {
+    root.replaceChildren(backLink(), h('p', { class: 'note bad' }, err.message));
+    return;
+  }
+  const m = d.match;
+  document.title = `مطابقة #${m.number} — ${m.branchName}`;
+  const edit = d.canEdit;
+  const reload = () => renderMatch(pid);
+  const camera = (kind, title, hint, doneLabel) => openCamera({
+    root, kind, title, subtitle: `${m.branchName} · ${m.weekday} ${m.businessDate}`, hint, publicId: pid, editToken, doneLabel,
+    onResult: () => { toast('تمت القراءة.', 'ok'); reload(); }, onClose: reload,
+  });
+  const photoBtn = (kind, title, hint, has, label) => (edit
+    ? h('button', { class: `btn ${has ? '' : 'primary'}`, type: 'button', 'data-testid': `photo-${kind}`, onclick: () => camera(kind, title, hint, label) }, has ? '📷 إعادة التصوير' : '📷 تصوير')
+    : null);
+  const photoLinks = (doc) => (doc?.captureIds?.length ? h('div', { class: 'photos' }, ...doc.captureIds.map((id) => h('a', { href: `/api/matches/${pid}/captures/${id}`, target: '_blank', rel: 'noopener' },
+    h('img', { src: `/api/matches/${pid}/captures/${id}`, alt: 'صورة المستند', loading: 'lazy' })))) : null);
+  const warnFields = (kind) => new Set(d.warnings.filter((w) => w.kind === kind && w.field).map((w) => w.field));
+
+  const valueCell = (doc, f, kind) => {
+    const v = doc?.fields?.[f];
+    const flagged = warnFields(kind).has(f);
+    return h('td', { class: `num ${flagged ? 'warn-cell' : ''}`, dir: 'ltr' }, v === null || v === undefined ? (doc ? 'فارغة' : '—') : formatSar(v));
+  };
+
+  // ---- header
+  const header = h('section', { class: `card match-head ${m.status === 'open' ? 'is-open' : m.result}` },
+    h('div', { class: 'head-main' },
+      h('div', {}, h('small', { class: 'muted' }, 'رقم المطابقة'), h('div', { class: 'big-number' }, `#${m.number}`)),
+      statusChip(m, { large: true })),
+    h('dl', { class: 'facts' },
+      h('div', {}, h('dt', {}, 'الفرع'), h('dd', {}, m.branchName)),
+      h('div', {}, h('dt', {}, 'اليوم'), h('dd', {}, m.weekday)),
+      h('div', {}, h('dt', {}, 'التاريخ'), h('dd', { dir: 'ltr' }, m.businessDate))),
+    h('div', { class: 'share' },
+      h('img', { class: 'qr', src: `/api/matches/${pid}/qr.svg`, alt: 'رمز QR لاستعراض المطابقة', width: '112', height: '112' }),
+      h('div', { class: 'share-text' },
+        h('small', { class: 'muted' }, 'رابط الاستعراض'),
+        h('code', { dir: 'ltr', 'data-testid': 'share-url' }, shareUrl(pid)),
+        copyButton(pid))));
+
+  const rule = edit ? h('p', { class: 'note info' }, '✋ لا يمكن تعديل الأرقام في التطبيق. إذا أردت تعديل رقم: صحّح الكتابة بخط اليد على المستند الورقي ثم أعد تصويره.') : null;
+
+  // ---- results (green / red with the difference)
+  const results = h('section', { class: 'card' },
+    h('h2', {}, 'نتيجة المطابقة'),
+    d.checks.length ? h('ul', { class: 'checks', 'data-testid': 'checks' }, ...d.checks.map((c) => h('li', { class: c.ok ? 'ok' : 'bad' },
+      h('div', { class: 'check-title' }, h('span', { class: 'mark' }, c.ok ? '✓' : '✗'), h('span', {}, c.title), h('span', { class: 'chip small' }, c.ok ? 'مطابق' : 'غير مطابق')),
+      h('div', { class: 'check-values' },
+        h('span', {}, `${c.left.label}: `, h('b', { dir: 'ltr' }, formatSar(c.left.halalas))),
+        h('span', {}, `${c.right.label}: `, h('b', { dir: 'ltr' }, formatSar(c.right.halalas))),
+        c.ok ? null : h('span', { class: 'diff' }, 'الفرق: ', h('b', { dir: 'ltr' }, formatSar(c.diffHalalas)), ' ريال')))))
+      : h('p', { class: 'muted' }, 'تظهر المقارنات بعد تصوير المستندات.'));
+
+  // ---- yellow alerts
+  const alerts = [...d.missing.map((x) => x.text), ...d.warnings.map((w) => w.text)];
+  const alertCard = alerts.length ? h('section', { class: 'card alerts', 'data-testid': 'alerts' },
+    h('h2', {}, 'تنبيهات'), h('ul', {}, ...alerts.map((t) => h('li', {}, t)))) : null;
+
+  // ---- closing form (read-only, paper layout)
+  const form = d.documents.daily_closing_form;
+  const formCard = h('section', { class: 'card doc', 'data-doc': 'daily_closing_form' },
+    h('div', { class: 'doc-head' }, h('h2', {}, 'اليومية'),
+      photoBtn('daily_closing_form', 'إعادة تصوير اليومية', 'ضع النموذج كاملًا داخل الإطار. يجب أن يكون لنفس الفرع ونفس التاريخ.', Boolean(form), 'قراءة اليومية')),
+    ...CLOSING_FORM.map((sec) => h('div', { class: 'form-section' },
+      h('div', { class: 'section-bar' }, h('span', {}, sec.title), h('span', { class: 'en' }, sec.en)),
+      h('table', { class: 'paper' }, h('tbody', {}, ...sec.rows.map(([f, ar, en]) => h('tr', {},
+        h('th', { scope: 'row' }, ar, h('span', { class: 'en' }, en)), valueCell(form, f, 'daily_closing_form'))))))),
+    h('div', { class: 'form-section' }, h('div', { class: 'section-bar' }, h('span', {}, 'ملاحظات'), h('span', { class: 'en' }, 'NOTES / REMARKS')),
+      h('p', { class: 'notes-text' }, form?.extras?.notes || '—')),
+    photoLinks(form));
+
+  const docCard = (doc) => {
+    const r = d.documents[doc.kind];
+    return h('section', { class: 'card doc', 'data-doc': doc.kind },
+      h('div', { class: 'doc-head' }, h('h2', {}, doc.title), photoBtn(doc.kind, `تصوير ${doc.title}`, doc.hint, Boolean(r))),
+      r ? h('table', { class: 'paper plain' }, h('tbody', {}, ...doc.rows.map(([f, ar]) => h('tr', {}, h('th', { scope: 'row' }, ar), valueCell(r, f, doc.kind)))))
+        : h('p', { class: 'muted' }, 'لم يتم التصوير بعد.'),
+      doc.kind === 'deposit_receipt' && d.yesterday ? h('p', { class: 'muted small' }, 'تُقارن مع ', h('a', { href: `/m/${d.yesterday.publicId}`, 'data-link': '' }, `مطابقة أمس رقم ${d.yesterday.number}`)) : null,
+      photoLinks(r));
+  };
+
+  // ---- expenses
+  const expensesCard = d.expensesRequired || d.expenses.length ? h('section', { class: 'card doc', 'data-doc': 'expense_invoice' },
+    h('div', { class: 'doc-head' }, h('h2', {}, 'فواتير المصروفات'),
+      edit ? h('button', { class: 'btn primary', type: 'button', 'data-testid': 'photo-expense_invoice', onclick: () => camera('expense_invoice', 'تصوير فاتورة مصروف', 'صوّر فاتورة المصروف كاملة بحيث يظهر الإجمالي.', 'قراءة الفاتورة') }, '📷 تصوير فاتورة') : null),
+    h('p', { class: 'muted small' }, `المنصرف في اليومية: ${formatSar(form?.fields?.cash_outflow)} ريال. صوّر فاتورة لكل مصروف.`),
+    d.expenses.length ? h('ul', { class: 'expense-list' }, ...d.expenses.map((x, i) => h('li', {},
+      h('span', {}, `فاتورة ${i + 1}${x.extras?.vendor ? ` — ${x.extras.vendor}` : ''}`),
+      h('b', { dir: 'ltr' }, formatSar(x.fields.amount)),
+      photoLinks(x),
+      edit ? h('button', { class: 'btn small ghost', type: 'button', onclick: async () => {
+        if (!window.confirm('حذف هذه الفاتورة؟')) return;
+        try { await api(`/matches/${pid}/expenses/${x.readingId}`, { method: 'DELETE', editToken }); reload(); } catch (err) { toast(err.message, 'error'); }
+      } }, 'حذف') : null))) : h('p', { class: 'muted' }, 'لم تُصوّر أي فاتورة بعد.')) : null;
+
+  // ---- cash (confirm only; no editing)
+  const cashCard = h('section', { class: 'card doc', 'data-doc': 'cash' },
+    h('div', { class: 'doc-head' }, h('h2', {}, 'عدّ النقد'),
+      edit && !d.cash.confirmed ? h('button', { class: `btn ${d.cash.pending ? '' : 'primary'}`, type: 'button', 'data-testid': 'photo-cash',
+        onclick: () => camera('cash', 'عدّ النقد', 'افرد الأوراق النقدية والعملات بحيث تظهر كل قطعة. يمكنك التقاط أكثر من صورة. الصور لا تُحفظ على الجوال.', 'عدّ النقد') }, d.cash.pending ? '📷 إعادة التصوير' : '📷 فتح الكاميرا لعدّ النقد') : null),
+    d.cash.confirmed ? h('p', { class: 'cash-total' }, 'النقد المعدود: ', h('b', { dir: 'ltr' }, d.cash.confirmed.total), ' ريال')
+      : d.cash.pending ? cashReview(d, pid, editToken, reload)
+        : h('p', { class: 'muted' }, 'لم يتم عدّ النقد بعد.'));
+
+  const submit = edit ? h('section', { class: `card submit ${d.complete ? 'ready' : ''}` },
+    h('button', { class: 'btn primary wide', type: 'button', disabled: !d.complete, 'data-testid': 'submit', onclick: async () => {
+      if (!window.confirm('بعد الاعتماد لا يمكن تعديل المطابقة. متابعة؟')) return;
+      try { await api(`/matches/${pid}/submit`, { method: 'POST', editToken }); toast('تم اعتماد المطابقة.', 'ok'); reload(); } catch (err) { toast(err.message, 'error'); }
+    } }, 'اعتماد المطابقة'),
+    d.complete ? null : h('p', { class: 'muted small center' }, 'يُفعّل بعد تصوير كل المستندات المطلوبة.')) : null;
+
+  root.replaceChildren(backLink(), header, rule, results, alertCard, formCard, ...DOCS.map(docCard), expensesCard, cashCard, submit);
+}
+
+function cashReview(d, pid, editToken, reload) {
+  const p = d.cash.pending;
+  const rows = d.denominations.filter((x) => p.counts[x.id] > 0).map((x) => h('tr', {}, h('td', {}, x.labelAr), h('td', { class: 'num' }, String(p.counts[x.id])), h('td', { class: 'num', dir: 'ltr' }, formatSar(p.counts[x.id] * x.halalas))));
+  const box = h('input', { type: 'checkbox', id: 'confirm-cash' });
+  const btn = h('button', { class: 'btn primary', type: 'button', disabled: true, 'data-testid': 'confirm-cash' }, 'تأكيد العدّ');
+  box.addEventListener('change', () => { btn.disabled = !box.checked; });
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try { await api(`/matches/${pid}/cash/confirm`, { method: 'POST', editToken, body: { readingId: p.readingId, confirmed: true } }); toast('تم تأكيد عدّ النقد.', 'ok'); reload(); }
+    catch (err) { toast(err.message, 'error'); btn.disabled = false; }
+  });
+  return h('div', { class: 'cash-review' },
+    h('p', { class: 'note info' }, 'هذه الأعداد من الذكاء الاصطناعي ولا يمكن تعديلها. قارنها بالنقد أمامك: إذا كانت صحيحة أكّدها، وإذا كانت خاطئة أعد التصوير بعد فرد النقد بشكل أوضح.'),
+    p.issues.length ? h('ul', { class: 'issues' }, ...p.issues.map((i) => h('li', {}, i))) : null,
+    rows.length ? h('table', { class: 'paper plain' }, h('thead', {}, h('tr', {}, h('th', {}, 'الفئة'), h('th', { class: 'num' }, 'العدد'), h('th', { class: 'num' }, 'ريال'))), h('tbody', {}, ...rows))
+      : h('p', { class: 'muted' }, 'لم يُعثر على نقد في الصور.'),
+    h('p', { class: 'cash-total' }, 'الإجمالي: ', h('b', { dir: 'ltr', 'data-testid': 'cash-total' }, formatSar(p.totalHalalas)), ' ريال'),
+    h('label', { class: 'confirm-line', for: 'confirm-cash' }, box, ' عددت النقد وأؤكد أن الأعداد أعلاه صحيحة.'),
+    h('div', { class: 'actions' }, btn));
+}
+
+function backLink() {
+  return h('nav', { class: 'crumbs' }, h('a', { href: '/', 'data-link': '' }, '→ آخر المطابقات'));
+}
+
+route();

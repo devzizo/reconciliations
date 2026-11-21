@@ -19,41 +19,31 @@ export function h(tag, attrs = {}, ...children) {
 }
 
 export class ApiError extends Error {
-  constructor(status, code, message) { super(message); this.status = status; this.code = code; }
+  constructor(status, code, message, details) { super(message); this.status = status; this.code = code; this.details = details; }
 }
 
-let authToken = null;
-try { authToken = sessionStorage.getItem('authToken'); } catch { /* storage may be blocked */ }
-
-export function setAuthToken(t) {
-  authToken = t;
-  try { t ? sessionStorage.setItem('authToken', t) : sessionStorage.removeItem('authToken'); } catch { /* ignore */ }
-}
-export const hasAuthToken = () => Boolean(authToken);
-
-export async function api(path, { method = 'GET', body, rawBody, formData, headers = {} } = {}) {
+export async function api(path, { method = 'GET', body, rawBody, headers = {}, editToken } = {}) {
   const init = { method, headers: { ...headers }, cache: 'no-store' };
-  if (authToken) init.headers.Authorization = `Bearer ${authToken}`;
+  if (editToken) init.headers['X-Edit-Token'] = editToken;
   if (body !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(body); }
   if (rawBody !== undefined) init.body = rawBody;
-  if (formData !== undefined) init.body = formData;
   let res;
   try {
     res = await fetch(`/api${path}`, init);
   } catch {
     throw new ApiError(0, 'NETWORK', 'تعذّر الاتصال. تحقق من الإنترنت وحاول مرة أخرى.');
   }
-  if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    if (res.status === 401 && data?.error?.code === 'UNAUTHENTICATED') {
-      setAuthToken(null);
-      window.dispatchEvent(new Event('auth-expired'));
-    }
-    throw new ApiError(res.status, data?.error?.code ?? 'ERROR', data?.error?.message ?? `فشل الطلب (${res.status}).`);
-  }
+  if (!res.ok) throw new ApiError(res.status, data?.error?.code ?? 'ERROR', data?.error?.message ?? `فشل الطلب (${res.status}).`, data?.error?.details);
   return data;
 }
+
+// The device that starts a reconciliation keeps its edit token. It never leaves this browser except to the server.
+const KEY = (pid) => `edit-token:${pid}`;
+export const editTokens = {
+  get(pid) { try { return localStorage.getItem(KEY(pid)); } catch { return null; } },
+  set(pid, token) { try { localStorage.setItem(KEY(pid), token); } catch { /* storage blocked */ } },
+};
 
 export const formatSar = (halalas) => (halalas === null || halalas === undefined ? '—' : (halalas / 100).toFixed(2));
 
@@ -64,17 +54,14 @@ export function toast(message, kind = 'info') {
   setTimeout(() => el.remove(), 5000);
 }
 
-const AR_DIGITS = { '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
-  '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9' };
-
-/** Same parsing as the server: halalas, null when empty, undefined when invalid. Accepts Arabic digits. */
-export function parseAmount(value) {
-  let s = String(value ?? '').trim().replace(/[٠-٩۰-۹]/g, (d) => AR_DIGITS[d]);
-  if (s === '') return null;
-  s = s.replace(/[٫]/g, '.').replace(/[,،٬\s]/g, '');
-  if (!/^-?\d{1,9}(\.\d{1,2})?$/.test(s)) return undefined;
-  const neg = s.startsWith('-');
-  const [w, f = ''] = s.replace('-', '').split('.');
-  const v = Number(w) * 100 + Number(f.padEnd(2, '0'));
-  return neg ? -v : v;
+export async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch { /* fall back */ }
+  const ta = h('textarea', { readonly: true, class: 'offscreen' });
+  ta.value = text;
+  document.body.append(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { /* ignore */ }
+  ta.remove();
+  return ok;
 }
