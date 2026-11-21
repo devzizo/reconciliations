@@ -5,6 +5,7 @@ import { randomToken, sha256Hex, tokenMatches } from '../auth.js';
 import { HttpError } from '../errors.js';
 import { DOC_NAMES, evaluate, weekdayOf } from '../services/checks.js';
 import { DENOMINATIONS, formatSar } from '../services/denominations.js';
+import { findOrCreateBranch } from '../services/branches.js';
 
 /**
  * Reconciliations ("مطابقات"). Viewable by anyone who has a reconciliation's link or QR code (there is no
@@ -54,7 +55,23 @@ export function createMatches({ db, audit, files }) {
       const prevForm = parseReading(await db.get("SELECT * FROM readings WHERE match_id = ? AND kind = 'daily_closing_form' AND state = 'current'", prev.id));
       yesterday = { number: prev.number, publicId: prev.public_id, closingCashHalalas: prevForm?.fields?.closing_cash_balance ?? null };
     }
-    const evaluation = evaluate({ docs, expenses, cash: confirmation ? { totalHalalas: confirmation.total_halalas } : null, yesterday, businessDate: m.business_date });
+    // The same banknotes (by serial number) in another branch's confirmed cash count within a week.
+    const cashRd = confirmation ? parseReading(await db.get('SELECT * FROM readings WHERE id = ?', confirmation.reading_id)) : cashReading;
+    let cashClashes = [];
+    if (cashRd) {
+      const day = Date.parse(`${m.business_date}T00:00:00Z`);
+      const from = new Date(day - 7 * 86_400_000).toISOString().slice(0, 10);
+      const to = new Date(day + 7 * 86_400_000).toISOString().slice(0, 10);
+      cashClashes = await db.all(`SELECT mine.serial, mine.denomination, om.number, om.business_date, ob.name_ar AS branch
+        FROM cash_serials mine
+        JOIN cash_serials other ON other.serial = mine.serial AND other.match_id <> mine.match_id
+        JOIN cash_confirmations oc ON oc.reading_id = other.reading_id
+        JOIN matches om ON om.id = other.match_id
+        JOIN branches ob ON ob.id = om.branch_id
+        WHERE mine.reading_id = ? AND om.branch_id <> ? AND om.business_date BETWEEN ? AND ?
+        ORDER BY om.number LIMIT 50`, cashRd.id, m.branch_id, from, to);
+    }
+    const evaluation = evaluate({ docs, expenses, cash: confirmation ? { totalHalalas: confirmation.total_halalas, issues: cashRd?.issues ?? [] } : null, cashClashes, yesterday, businessDate: m.business_date });
     return { docs, expenses, cashReading, confirmation, yesterday, evaluation };
   }
 
@@ -88,11 +105,15 @@ export function createMatches({ db, audit, files }) {
       cash: {
         confirmed: confirmation ? { totalHalalas: confirmation.total_halalas, total: formatSar(confirmation.total_halalas), confirmedAt: confirmation.confirmed_at } : null,
         // Pending AI count awaiting confirmation; photos of cash are only shown to the editing device.
-        pending: !confirmation && cashReading && editable ? { readingId: cashReading.id, status: cashReading.status, counts: cashReading.fields, totalHalalas: cashReading.extras.totalHalalas, issues: cashReading.issues } : null,
+        pending: !confirmation && cashReading && editable ? { readingId: cashReading.id, status: cashReading.status, counts: cashReading.fields, totalHalalas: cashReading.extras.totalHalalas, issues: cashReading.issues,
+          serialsRead: cashReading.extras.serials?.length ?? 0, duplicatesRemoved: cashReading.extras.duplicatesRemoved ?? 0, unreadableSerials: cashReading.extras.unreadableSerials ?? 0 } : null,
       },
       yesterday: yesterday ? { number: yesterday.number } : null,
       denominations: DENOMINATIONS,
       ...evaluation,
+      // Approved reconciliations show the notes report exactly as it was approved.
+      ...(m.report_json ? (({ generatedAt, formNotes, ...frozen }) => ({ ...frozen, complete: true, report: { generatedAt, formNotes, frozen: true } }))(JSON.parse(m.report_json))
+        : { report: { generatedAt: null, formNotes: docs.daily_closing_form?.extras?.notes ?? null, frozen: false } }),
     };
   }
 
@@ -122,13 +143,13 @@ export function createMatches({ db, audit, files }) {
     let editToken = null;
 
     if (session.kind === 'daily_closing_form') {
-      const branchId = result.extras?.branch;
       const date = result.extras?.date;
-      const branch = branchId ? await db.get('SELECT * FROM branches WHERE id = ? AND active = 1', branchId) : null;
+      // The branch is whatever is written on the form; a new name creates the branch.
+      const branch = result.extras?.branch ? await findOrCreateBranch(db, result.extras.branch) : null;
       const age = date ? (Date.now() - Date.parse(`${date}T00:00:00Z`)) / 86_400_000 : NaN;
       if (!branch || !date || Number.isNaN(age) || age < -1 || age > 120) {
         const what = [!branch && 'اسم الفرع', (!date || Number.isNaN(age) || age < -1 || age > 120) && 'التاريخ'].filter(Boolean).join(' و');
-        return reject(readingId, 422, 'FORM_HEADER_UNREADABLE', `تعذّر قراءة ${what} من اليومية. تأكد أنه مكتوب بوضوح في أعلى النموذج ثم أعد التصوير.`, { issues: result.issues ?? [], read: { branch: branchId ?? null, date: date ?? null } });
+        return reject(readingId, 422, 'FORM_HEADER_UNREADABLE', `تعذّر قراءة ${what} من اليومية. تأكد أنه مكتوب بوضوح في أعلى النموذج ثم أعد التصوير.`, { issues: result.issues ?? [], read: { branch: result.extras?.branch ?? null, date: date ?? null } });
       }
       if (m) {
         if (m.branch_id !== branch.id || m.business_date !== date) {
@@ -157,6 +178,11 @@ export function createMatches({ db, audit, files }) {
       await db.run("UPDATE readings SET state = 'replaced' WHERE match_id = ? AND kind = ? AND state = 'current'", m.id, session.kind);
     }
     await db.run("UPDATE readings SET state = 'current' WHERE id = ?", readingId);
+    if (session.kind === 'cash') {
+      for (const n of result.extras?.serials ?? []) {
+        await db.run('INSERT OR IGNORE INTO cash_serials (reading_id, match_id, serial, denomination) VALUES (?, ?, ?, ?)', readingId, m.id, n.serial, n.denomination);
+      }
+    }
     await refreshResult(m);
     m = await db.get('SELECT * FROM matches WHERE id = ?', m.id);
     await audit.record({ req, action: 'reading.accepted', reconciliationId: m.id, entityType: 'reading', entityId: readingId, details: { kind: session.kind } });
@@ -242,7 +268,12 @@ export function createMatches({ db, audit, files }) {
       throw new HttpError(409, 'MATCH_INCOMPLETE', `أكمل التصوير أولًا: ${evaluation.missing.map((x) => DOC_NAMES[x.kind]).join('، ')}.`, { missing: evaluation.missing });
     }
     const now = new Date().toISOString();
-    await db.run("UPDATE matches SET status = 'submitted', result = ?, submitted_at = ?, updated_at = ? WHERE id = ? AND status = 'open'", evaluation.result, now, now, m.id);
+    // Freeze the notes report as approved; the link / QR always shows this version.
+    const { docs } = await load(m);
+    const report = { generatedAt: now, result: evaluation.result, checks: evaluation.checks, warnings: evaluation.warnings, missing: evaluation.missing,
+      formNotes: docs.daily_closing_form?.extras?.notes ?? null };
+    await db.run("UPDATE matches SET status = 'submitted', result = ?, report_json = ?, submitted_at = ?, updated_at = ? WHERE id = ? AND status = 'open'",
+      evaluation.result, JSON.stringify(report), now, now, m.id);
     await audit.record({ req, action: 'match.submitted', reconciliationId: m.id, entityType: 'match', entityId: m.id, details: { result: evaluation.result, checks: evaluation.checks } });
     res.json(await detail(req, await byPublicId(m.public_id)));
   });

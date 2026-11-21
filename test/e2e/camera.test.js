@@ -48,6 +48,9 @@ test('full flow from the home page; figures are read-only; viewers get QR and li
   assert.equal(await page.getAttribute('html', 'dir'), 'rtl');
   assert.doesNotMatch(await page.textContent('body'), /HOVEN/i, 'no logo on the open home page');
   assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), 'rgb(246, 247, 251)');
+  const form = await page.request.get(srv.base + await page.getAttribute('[data-testid=download-form]', 'href'));
+  assert.equal(form.headers()['content-type'], 'application/pdf');
+  assert.doesNotMatch((await form.body()).toString('latin1'), /HOVEN/);
 
   reader.next('daily_closing_form', TABUK_FORM);
   await page.click('[data-testid=new-match]');
@@ -58,7 +61,7 @@ test('full flow from the home page; figures are read-only; viewers get QR and li
   assert.match(await page.textContent('.facts'), /تبوك.*الخميس.*2026-11-19/s);
   assert.match(await page.textContent('.note.info'), /صحّح الكتابة بخط اليد/);
   assert.equal(await page.locator('main input:not([type=checkbox]), main textarea').count(), 0, 'no editable figures');
-  assert.match(await page.textContent('[data-testid=checks]'), /مجموع طرق الدفع = صافي المبيعات/);
+  assert.match(await page.textContent('[data-testid=report]'), /تقرير الملاحظات على الإقفال.*مجموع طرق الدفع = صافي المبيعات/s);
   assert.match(await page.textContent('[data-testid=alerts]'), /لم يتم تصوير تقرير Z/);
   assert.match(await page.textContent('[data-testid=share-url]'), /\/m\/[\w-]+$/);
 
@@ -82,7 +85,7 @@ test('full flow from the home page; figures are read-only; viewers get QR and li
   assert.equal(await page.isDisabled('[data-testid=confirm-cash]'), true);
   await page.check('#confirm-cash');
   await page.click('[data-testid=confirm-cash]');
-  await page.waitForSelector('text=النقد المعدود:');
+  await page.waitForSelector('[data-doc=cash] .cash-total:has-text("النقد المعدود")');
 
   page.once('dialog', (d) => d.accept());
   await page.click('[data-testid=submit]');
@@ -96,6 +99,7 @@ test('full flow from the home page; figures are read-only; viewers get QR and li
   await viewer.waitForSelector('.big-number');
   assert.equal(await viewer.locator('[data-testid^=photo-]').count(), 0);
   assert.equal(await viewer.locator('.share img.qr').count(), 1);
+  assert.match(await viewer.textContent('[data-testid=report]'), /محفوظ عند الاعتماد.*غير مطابق.*الفرق: -5\.00.*ملاحظات مكتوبة في اليومية.*إيداع كاش الصندوق 4750 ريال/s);
 
   // Another phone's home page shows no reconciliations at all.
   await viewer.goto(srv.base);
@@ -145,7 +149,7 @@ test('camera stops mid-capture → capture and sending disabled', { skip }, asyn
 test('unreadable form header → told to photograph again', { skip }, async () => {
   const page = await newPage();
   await page.goto(srv.base);
-  reader.next('daily_closing_form', { fields: TABUK_FORM.fields, extras: { branch: 'tabuk', date: null } });
+  reader.next('daily_closing_form', { fields: TABUK_FORM.fields, extras: { branch: 'تبوك', date: null } });
   await page.click('[data-testid=new-match]');
   await shoot(page);
   await page.waitForSelector('.cam-result:not([hidden])');

@@ -35,11 +35,13 @@ export default {
 
 function serveStatic(request, url) {
   // Single-page app: unknown paths get index.html.
-  const file = STATIC_FILES[url.pathname] ?? STATIC_FILES['/index.html'];
+  const file = STATIC_FILES[decodeURIComponent(url.pathname)] ?? STATIC_FILES['/index.html'];
   const headers = new Headers(STATIC_HEADERS);
   headers.set('Content-Type', file.type);
   headers.set('ETag', file.etag);
   headers.set('Cache-Control', 'no-cache');
   if (request.headers.get('if-none-match') === file.etag) return new Response(null, { status: 304, headers });
-  return new Response(request.method === 'HEAD' ? null : file.body, { headers });
+  if (file.base64) headers.set('Content-Disposition', `inline; filename="${url.pathname.slice(1)}"`);
+  const body = file.base64 ? Buffer.from(file.base64, 'base64') : file.body;
+  return new Response(request.method === 'HEAD' ? null : body, { headers });
 }

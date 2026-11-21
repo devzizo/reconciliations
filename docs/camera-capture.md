@@ -7,16 +7,25 @@ photographs it again.
 
 ## Flow
 
+0. The blank form can be downloaded from the home page (`public/daily-closing-form.pdf`, generated from
+   `forms/daily-closing-form.html` by `node scripts/build-form.mjs`), printed and filled in by hand.
 1. **مطابقة جديدة** → live camera → photograph the daily closing form (FIN-DCF-01).
-   The AI reads the **branch** (chosen from the branches table), the **date**, the weekday and every
-   amount. The reconciliation is created with the next sequential number. If the branch or date can't be
+   The AI reads the **branch name as written** (a new name creates the branch automatically; spelling
+   variants such as "فرع تبوك" / "تبوك" / "تَبوك" are the same branch — `src/services/branches.js`), the
+   **date**, the weekday and every amount. The reconciliation is created with the next sequential number. If the branch or date can't be
    read, nothing is created and the employee is asked to photograph again.
    One reconciliation per branch per day: a second phone photographing the same day's form is shown
    the existing reconciliation's number instead.
 2. On the same phone, photograph: Z report, bank settlement receipt, yesterday's cash deposit receipt,
    one invoice per expense (required when an expense is written on the form), and the cash.
-3. Cash: the AI counts each denomination; the employee compares and **confirms** (or photographs again).
-4. **اعتماد المطابقة** once every required photograph is in. The result is stored as matched / unmatched.
+3. Cash: the AI lists every banknote with its **serial number**. A note seen in several photographs is
+   counted once (and reported); notes whose serial can't be read are counted but reported (yellow). If
+   the same serial numbers appear in **another branch's** confirmed cash count within 7 days, the
+   reconciliation gets a red "تكرار أوراق نقدية" item. The employee compares and **confirms** (or
+   photographs again).
+4. **اعتماد المطابقة** once every required photograph is in. The result and the **notes report**
+   (mismatches with differences, alerts, the notes written on the form) are stored with the
+   reconciliation; its link / QR code always shows the report exactly as approved, with a print button.
 
 There is no public list. The home page shows only the latest reconciliation started on that phone
 (number, branch, date, status, QR code, copyable link). Every reconciliation stays in the database and

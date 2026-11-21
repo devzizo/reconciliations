@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>نموذج الإقفال اليومي</title>
+<style>
+  /* Fonts are inlined by scripts/build-form.mjs */
+  @page { size: A4; margin: 14mm 14mm 12mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Noto Sans Arabic", "DejaVu Sans", sans-serif; color: #111; font-size: 10.5pt; }
+  .en { font-family: "DejaVu Sans", sans-serif; direction: ltr; }
+  header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; border-bottom: 2px solid #111; padding-bottom: 6px; margin-bottom: 10px; }
+  header .code { font-size: 7.5pt; color: #444; text-align: left; line-height: 1.4; }
+  header .title { text-align: center; }
+  header .title h1 { margin: 0; font-size: 17pt; font-weight: 700; }
+  header .title .en { font-size: 9pt; letter-spacing: .25em; font-weight: 700; }
+  .meta { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid #555; margin-bottom: 10px; }
+  .meta div { padding: 6px 8px 22px; border-inline-start: 1px solid #555; position: relative; }
+  .meta div:first-child { border-inline-start: 0; }
+  .meta b { font-size: 10pt; } .meta .en { font-size: 7pt; color: #555; margin-inline-start: 4px; }
+  .meta div::after { content: ""; position: absolute; inset: auto 8px 6px; border-bottom: 1px dotted #777; }
+  .bar { display: flex; justify-content: space-between; align-items: center; background: #ececec; border: 1px solid #bbb; border-radius: 3px; padding: 3px 8px; margin: 12px 0 4px; font-weight: 700; font-size: 10pt; }
+  .bar .en { font-size: 8pt; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #888; padding: 0 8px; height: 22px; font-size: 9.5pt; }
+  thead th { background: #f4f4f4; font-weight: 700; height: 20px; }
+  td.ar { text-align: right; width: 34%; font-weight: 700; }
+  td.val { width: 32%; }
+  td.en, th.en { text-align: left; width: 34%; font-size: 8.5pt; }
+  .notes { display: flex; justify-content: space-between; margin: 12px 0 3px; font-weight: 700; font-size: 9.5pt; }
+  .notes-box { border: 1px solid #888; border-radius: 4px; height: 46px; }
+  .sign { width: 48%; border: 1px dashed #888; border-radius: 4px; margin-top: 14px; padding: 6px 10px 10px; text-align: center; font-size: 9pt; }
+  .sign .line { border-bottom: 1px solid #333; margin: 30px 12px 0; }
+  footer { margin-top: 12px; font-size: 7.5pt; color: #555; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <div></div>
+  <div class="title"><h1>نموذج الإقفال اليومي</h1><div class="en">DAILY CLOSING FORM</div></div>
+  <div class="code en">Doc Code: FIN-DCF-01<br>Version: 2.1</div>
+</header>
+
+<div class="meta">
+  <div><b>الفرع:</b><span class="en">(BRANCH)</span></div>
+  <div><b>اليوم:</b><span class="en">(DAY)</span></div>
+  <div><b>التاريخ:</b><span class="en">(DATE)</span></div>
+</div>
+
+<div class="bar"><span>المبيعات الإجمالية والتسويات</span><span class="en">SALES SUMMARY &amp; ADJUSTMENTS</span></div>
+<table>
+  <thead><tr><th>العنصر (بالعربية)</th><th>المبلغ / Value</th><th class="en">Item (English)</th></tr></thead>
+  <tbody>
+    <tr><td class="ar">إجمالي المبيعات</td><td class="val"></td><td class="en">Gross Sales</td></tr>
+    <tr><td class="ar">المرتجعات</td><td class="val"></td><td class="en">Returns / Refunds</td></tr>
+    <tr><td class="ar">صافي المبيعات</td><td class="val"></td><td class="en">Net Sales</td></tr>
+  </tbody>
+</table>
+
+<div class="bar"><span>تفاصيل وسائل الدفع (POS &amp; Online)</span><span class="en">PAYMENT METHODS BREAKDOWN</span></div>
+<table>
+  <thead><tr><th>طريقة الدفع</th><th>المبلغ / Amount</th><th class="en">Payment Method</th></tr></thead>
+  <tbody>
+    <tr><td class="ar">شبكة (مدى / POS)</td><td class="val"></td><td class="en">Mada / POS Terminal</td></tr>
+    <tr><td class="ar">ماستر كارد</td><td class="val"></td><td class="en">Mastercard</td></tr>
+    <tr><td class="ar">فيزا</td><td class="val"></td><td class="en">Visa</td></tr>
+    <tr><td class="ar">تمارا</td><td class="val"></td><td class="en">Tamara</td></tr>
+    <tr><td class="ar">تابي</td><td class="val"></td><td class="en">Tabby</td></tr>
+    <tr><td class="ar">كاش / نقدي</td><td class="val"></td><td class="en">Cash Sales</td></tr>
+    <tr><td class="ar">الزيادة / العجز</td><td class="val"></td><td class="en">Overage / Shortage</td></tr>
+  </tbody>
+</table>
+
+<div class="bar"><span>حركة صندوق النقدية (الكاش)</span><span class="en">CASH MOVEMENT &amp; PETTY CASH</span></div>
+<table>
+  <thead><tr><th>البيان</th><th>المبلغ / Amount</th><th class="en">Description</th></tr></thead>
+  <tbody>
+    <tr><td class="ar">رصيد الصندوق أول اليوم</td><td class="val"></td><td class="en">Opening Cash Balance</td></tr>
+    <tr><td class="ar">الوارد (إيداعات / نقدي)</td><td class="val"></td><td class="en">Cash Inflow</td></tr>
+    <tr><td class="ar">المنصرف (مصاريف / استرجاع)</td><td class="val"></td><td class="en">Cash Outflow / Expenses</td></tr>
+    <tr><td class="ar">رصيد الصندوق آخر اليوم</td><td class="val"></td><td class="en">Closing Cash Balance</td></tr>
+  </tbody>
+</table>
+
+<div class="notes"><span>ملاحظات:</span><span class="en">(NOTES / REMARKS)</span></div>
+<div class="notes-box"></div>
+
+<div class="sign">
+  <div><b>توقيع مدير الفرع</b></div>
+  <div class="en" style="font-size:7.5pt">BRANCH MANAGER SIGNATURE</div>
+  <div class="line"></div>
+</div>
+
+<footer>اكتب الفرع والتاريخ والأرقام بخط واضح. لتعديل رقم: اشطبه واكتب الصحيح بجانبه ثم أعد تصوير النموذج من التطبيق.</footer>
+</body>
+</html>

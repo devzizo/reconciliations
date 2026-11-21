@@ -206,9 +206,10 @@ export function cameraRoutes({ db, audit, config, cashCounter, documentReader, a
     if (session.kind === 'cash') {
       const a = await cashCounter.analyze(images);
       const counts = normaliseCounts(a.counts);
-      result = { status: a.status, model: a.model, fields: counts, extras: { totalHalalas: totalHalalas(counts) }, lowConfidence: [], issues: a.issues ?? [] };
+      result = { status: a.status, model: a.model, fields: counts, lowConfidence: [], issues: a.issues ?? [],
+        extras: { totalHalalas: totalHalalas(counts), serials: a.serials ?? [], duplicatesRemoved: a.duplicatesRemoved ?? 0, unreadableSerials: a.unreadableSerials ?? 0 } };
     } else {
-      const branches = await db.all('SELECT id, name, name_ar FROM branches WHERE active = 1 ORDER BY id');
+      const branches = await db.all('SELECT id, name, name_ar FROM branches WHERE active = 1 AND norm_name IS NOT NULL ORDER BY name_ar');
       result = await documentReader.read({ kind: session.kind, bytes: images[0].bytes, branches });
     }
     const outcome = await matches.applyReading(req, session, result, { provider: session.kind === 'cash' ? cashCounter.provider : documentReader.provider });

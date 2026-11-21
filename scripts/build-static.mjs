@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pub = path.join(root, 'public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json' };
+const BINARY = { '.pdf': 'application/pdf' }; // embedded as base64
 
 const headers = {};
 for (const line of fs.readFileSync(path.join(pub, '_headers'), 'utf8').split('\n')) {
@@ -18,9 +19,12 @@ for (const line of fs.readFileSync(path.join(pub, '_headers'), 'utf8').split('\n
 const files = {};
 for (const name of fs.readdirSync(pub)) {
   const ext = path.extname(name);
-  if (!TYPES[ext]) continue;
-  const body = fs.readFileSync(path.join(pub, name), 'utf8');
-  files[`/${name}`] = { type: TYPES[ext], body, etag: `"${crypto.createHash('sha256').update(body).digest('hex').slice(0, 16)}"` };
+  if (!TYPES[ext] && !BINARY[ext]) continue;
+  const raw = fs.readFileSync(path.join(pub, name));
+  const etag = `"${crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16)}"`;
+  files[`/${name}`] = BINARY[ext]
+    ? { type: BINARY[ext], base64: raw.toString('base64'), etag }
+    : { type: TYPES[ext], body: raw.toString('utf8'), etag };
 }
 fs.mkdirSync(path.join(root, 'src', 'generated'), { recursive: true });
 fs.writeFileSync(path.join(root, 'src', 'generated', 'static.js'),

@@ -36,7 +36,7 @@ export async function photograph(srv, kind, { publicId, editToken, frames = 1 } 
 export const TABUK_FORM = {
   fields: { gross_sales: 456700, returns: 0, net_sales: 456700, mada: 279300, mastercard: 4500, visa: 114500, tamara: 0, tabby: 0, cash_sales: 58400,
     overage_shortage: 0, opening_cash_balance: 100000, cash_inflow: 58400, cash_outflow: 2000, closing_cash_balance: 67000 },
-  extras: { branch: 'tabuk', date: '2026-11-19', day_name: 'الخميس', notes: 'إيداع كاش الصندوق 4750 ريال' },
+  extras: { branch: 'فرع تبوك', date: '2026-11-19', day_name: 'الخميس', notes: 'إيداع كاش الصندوق 4750 ريال' },
 };
 export const TABUK_Z = { fields: { gross_sales: 467800, discount: -10891, net_sales: 456700, cash: 58400, mada: 279300, visa: 119000 }, extras: { date: '2026-11-20' } };
 export const TABUK_BANK = { fields: { mada_total: 279300, visa_total: 114500, mastercard_total: 4500 }, extras: { date: '2026-11-20' } };

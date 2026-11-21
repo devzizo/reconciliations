@@ -152,3 +152,24 @@ td.warn-cell { background: var(--warn-bg); color: var(--warn); }
   .facts div { padding: 6px 8px; } .facts dd { font-size: .92rem; }
   .hero h1 { font-size: 1.6rem; }
 }
+
+/* Notes report */
+.report .report-summary { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; }
+.chip.warn { background: var(--warn-bg); color: var(--warn); border-color: var(--warn-line); }
+.report .alerts { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 12px; padding: 10px 14px; margin-top: 10px; }
+.report .alerts h3, .report .form-notes h3 { margin: 0 0 6px; font-size: 1rem; }
+.report .alerts h3 { color: var(--warn); }
+.report .good-list { margin-top: 10px; }
+.report .good-list summary { cursor: pointer; font-weight: 700; color: var(--ok); padding: 6px 0; }
+.report .form-notes { margin-top: 12px; border-top: 1px dashed var(--line); padding-top: 10px; }
+.report .form-notes p { margin: 0; white-space: pre-wrap; }
+.hero-links { margin-top: 14px; }
+.hero-link { background: rgba(255, 255, 255, .14) !important; color: #fff !important; border-color: rgba(255, 255, 255, .35) !important; font-weight: 600; }
+.hero-note { font-size: .85rem; margin: 8px auto 0 !important; opacity: .85; }
+
+@media print {
+  body { background: #fff; }
+  .no-print, .crumbs, .btn, .toasts, .note.info, .submit, .photos { display: none !important; }
+  .card { box-shadow: none; break-inside: avoid; }
+  .report .good-list:not([open]) > *:not(summary) { display: block; }
+}

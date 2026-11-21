@@ -43,7 +43,7 @@ const normaliseDay = (s) => String(s ?? '').replace(/[ًٌٍَُِّْـ\s]/g, '
  *   yesterday: { number, closingCashHalalas } | null
  *   businessDate: 'YYYY-MM-DD'
  */
-export function evaluate({ docs, expenses = [], cash = null, yesterday = null, businessDate }) {
+export function evaluate({ docs, expenses = [], cash = null, cashClashes = [], yesterday = null, businessDate }) {
   const checks = [];
   const warnings = [];
   const missing = [];
@@ -138,6 +138,13 @@ export function evaluate({ docs, expenses = [], cash = null, yesterday = null, b
 
   // ---- cash count vs closing balance
   if (cash && docs.daily_closing_form) add('cash', 'النقد المعدود ↔ رصيد الصندوق آخر اليوم', 'النقد المعدود', cash.totalHalalas, 'اليومية', f('closing_cash_balance'));
+  for (const i of cash?.issues ?? []) warnings.push({ kind: 'cash', text: `عدّ النقد: ${i}` });
+  // The same banknotes in another branch's cash count: the cash may have been shown twice.
+  if (cashClashes.length) {
+    const seen = [...new Map(cashClashes.map((c) => [`${c.number}`, c])).values()];
+    checks.push({ id: 'cash_serials', ok: false, title: 'تكرار أوراق نقدية', flag: true,
+      text: `تكرار أوراق نقدية: ${cashClashes.length} ورقة بنفس الأرقام التسلسلية ظهرت في عدّ نقد ${seen.map((c) => `فرع ${c.branch} (مطابقة ${c.number} بتاريخ ${c.business_date})`).join('، ')}. الأرقام: ${cashClashes.slice(0, 5).map((c) => c.serial).join('، ')}${cashClashes.length > 5 ? '…' : ''}` });
+  }
 
   const complete = missing.length === 0;
   return { checks, warnings, missing, complete, result: complete && checks.every((c) => c.ok) ? 'matched' : 'unmatched' };

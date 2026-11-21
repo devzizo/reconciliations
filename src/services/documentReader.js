@@ -31,7 +31,7 @@ export const DOCUMENTS = {
       closing_cash_balance: 'Closing Cash Balance — رصيد الصندوق آخر اليوم',
     },
     extras: {
-      branch: 'The branch written in the الفرع (BRANCH) box — answer with one of the branch ids listed below, or "unknown" if it is not written or matches none.',
+      branch: 'The branch name exactly as written in the الفرع (BRANCH) box, in Arabic letters as written (e.g. "تبوك"). Empty string if nothing is written there or it cannot be read.',
       date: 'The date written in the التاريخ (DATE) box, as YYYY-MM-DD (Gregorian). Empty string if not readable.',
       day_name: 'The weekday written in the اليوم (DAY) box, in Arabic as written. Empty string if not written.',
       notes: 'Text written in the ملاحظات (NOTES / REMARKS) box, transcribed as written. Empty string if empty or crossed out.',
@@ -90,9 +90,9 @@ export function createDocumentReader(config) {
   };
 }
 
-function schemaFor(kind, branchIds) {
+function schemaFor(kind) {
   const spec = DOCUMENTS[kind];
-  const extras = Object.fromEntries(Object.keys(spec.extras).map((k) => [k, k === 'branch' ? { type: 'string', enum: [...branchIds, 'unknown'] } : { type: 'string' }]));
+  const extras = Object.fromEntries(Object.keys(spec.extras).map((k) => [k, { type: 'string' }]));
   return {
     type: 'object',
     additionalProperties: false,
@@ -126,7 +126,9 @@ function anthropicReader(config) {
       if (!spec) return unavailable('لا يمكن قراءة هذا النوع من المستندات.');
       const fieldList = Object.entries(spec.amounts).map(([id, label]) => `- ${id}: ${label}`).join('\n');
       const extraList = Object.entries(spec.extras).map(([id, label]) => `- ${id}: ${label}`).join('\n');
-      const branchList = 'branch' in spec.extras ? `\nKnown branches (id: Arabic / English name):\n${branches.map((b) => `- ${b.id}: ${b.name_ar ?? ''} / ${b.name}`).join('\n')}` : '';
+      // Known names are only spelling hints: a branch that is not in the list is simply written as read.
+      const branchList = 'branch' in spec.extras && branches.length
+        ? `\nBranch names already seen (if the written name is clearly one of these, write it exactly as listed; otherwise write what is on the form):\n${branches.map((b) => `- ${b.name_ar || b.name}`).join('\n')}` : '';
       const system = `You read figures from retail branch end-of-day documents photographed with a phone camera, for a reconciliation. The numbers you return are used as they are (nobody types them), so report only what is written; never calculate a value that is not on the document (except where told to add several reports together) and never guess.
 Rules:
 - Write amounts with Western digits and a dot for decimals, no thousands separators or currency, e.g. "4567", "584.00", "-108.91". Convert Arabic-Indic digits (٠١٢٣٤٥٦٧٨٩) to Western digits.
@@ -144,7 +146,7 @@ Rules:
           betas: ['server-side-fallback-2026-07-01'],
           fallbacks: 'default',
           thinking: { type: 'adaptive' },
-          output_config: { effort: 'high', format: { type: 'json_schema', schema: schemaFor(kind, branches.map((b) => b.id)) } },
+          output_config: { effort: 'high', format: { type: 'json_schema', schema: schemaFor(kind) } },
           system,
           messages: [{
             role: 'user',

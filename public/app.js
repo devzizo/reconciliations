@@ -54,6 +54,9 @@ async function renderHome() {
       h('h1', {}, 'مطابقة الإقفال اليومي'),
       h('p', {}, 'صوّر اليومية بالجوال، ويقرأ النظام الأرقام والفرع والتاريخ ويطابقها مع تقرير Z وإيصال البنك والنقد.'),
       start,
+      h('div', { class: 'hero-links' },
+        h('a', { class: 'btn hero-link', href: '/daily-closing-form.pdf', download: 'نموذج-الإقفال-اليومي.pdf', 'data-testid': 'download-form' }, '⬇ تحميل نموذج الإقفال اليومي للطباعة (PDF)')),
+      h('p', { class: 'hero-note' }, 'اطبع النموذج واملأه بخط اليد، ثم صوّره من هنا.'),
       h('ol', { class: 'steps' },
         h('li', {}, h('span', {}, '١'), 'صوّر اليومية'),
         h('li', {}, h('span', {}, '٢'), 'صوّر التقارير والإيصالات'),
@@ -165,22 +168,31 @@ async function renderMatch(pid) {
 
   const rule = edit ? h('p', { class: 'note info' }, '✋ لا يمكن تعديل الأرقام في التطبيق. إذا أردت تعديل رقم: صحّح الكتابة بخط اليد على المستند الورقي ثم أعد تصويره.') : null;
 
-  // ---- results (green / red with the difference)
-  const results = h('section', { class: 'card' },
-    h('h2', {}, 'نتيجة المطابقة'),
-    d.checks.length ? h('ul', { class: 'checks', 'data-testid': 'checks' }, ...d.checks.map((c) => h('li', { class: c.ok ? 'ok' : 'bad' },
-      h('div', { class: 'check-title' }, h('span', { class: 'mark' }, c.ok ? '✓' : '✗'), h('span', {}, c.title), h('span', { class: 'chip small' }, c.ok ? 'مطابق' : 'غير مطابق')),
-      h('div', { class: 'check-values' },
+  // ---- notes report on the closing (shown to anyone opening the link / QR; frozen when approved)
+  const checkItem = (c) => h('li', { class: c.ok ? 'ok' : 'bad' },
+    h('div', { class: 'check-title' }, h('span', { class: 'mark' }, c.ok ? '✓' : '✗'), h('span', {}, c.title), h('span', { class: 'chip small' }, c.ok ? 'مطابق' : 'غير مطابق')),
+    c.flag ? h('div', { class: 'check-values' }, h('span', { class: 'diff' }, c.text.replace(/^[^:]+:\s*/, '')))
+      : h('div', { class: 'check-values' },
         h('span', {}, `${c.left.label}: `, h('b', { dir: 'ltr' }, formatSar(c.left.halalas))),
         h('span', {}, `${c.right.label}: `, h('b', { dir: 'ltr' }, formatSar(c.right.halalas))),
-        c.ok ? null : h('span', { class: 'diff' }, 'الفرق: ', h('b', { dir: 'ltr' }, formatSar(c.diffHalalas)), ' ريال')))))
-      : h('p', { class: 'muted' }, 'تظهر المقارنات بعد تصوير المستندات.'));
-
-  // ---- yellow alerts
+        c.ok ? null : h('span', { class: 'diff' }, 'الفرق: ', h('b', { dir: 'ltr' }, formatSar(c.diffHalalas)), ' ريال')));
+  const bad = d.checks.filter((c) => !c.ok);
+  const good = d.checks.filter((c) => c.ok);
   const alerts = [...d.missing.map((x) => x.text), ...d.warnings.map((w) => w.text)];
-  const alertCard = alerts.length ? h('section', { class: 'card alerts', 'data-testid': 'alerts' },
-    h('h2', {}, 'تنبيهات'), h('ul', {}, ...alerts.map((t) => h('li', {}, t)))) : null;
-
+  const printBtn = h('button', { class: 'btn small ghost no-print', type: 'button', onclick: () => window.print() }, '🖨 طباعة');
+  const results = h('section', { class: 'card report', 'data-testid': 'report' },
+    h('div', { class: 'doc-head' }, h('h2', {}, 'تقرير الملاحظات على الإقفال'), printBtn),
+    d.report?.frozen ? h('p', { class: 'muted small' }, `محفوظ عند الاعتماد: ${new Date(d.report.generatedAt).toLocaleString('ar-SA')}`) : null,
+    h('div', { class: 'report-summary' },
+      h('span', { class: 'chip bad' }, `غير مطابق: ${bad.length}`),
+      h('span', { class: 'chip warn' }, `تنبيهات: ${alerts.length}`),
+      h('span', { class: 'chip ok' }, `مطابق: ${good.length}`)),
+    bad.length ? h('ul', { class: 'checks', 'data-testid': 'checks' }, ...bad.map(checkItem)) : null,
+    alerts.length ? h('div', { class: 'alerts', 'data-testid': 'alerts' }, h('h3', {}, 'تنبيهات'), h('ul', {}, ...alerts.map((t) => h('li', {}, t)))) : null,
+    good.length ? h('details', { class: 'good-list', open: bad.length === 0 ? true : null },
+      h('summary', {}, `✓ المقارنات المطابقة (${good.length})`), h('ul', { class: 'checks' }, ...good.map(checkItem))) : null,
+    d.checks.length === 0 && alerts.length === 0 ? h('p', { class: 'muted' }, 'تظهر الملاحظات بعد تصوير المستندات.') : null,
+    d.report?.formNotes ? h('div', { class: 'form-notes' }, h('h3', {}, 'ملاحظات مكتوبة في اليومية'), h('p', {}, d.report.formNotes)) : null);
   // ---- closing form (read-only, paper layout)
   const form = d.documents.daily_closing_form;
   const formCard = h('section', { class: 'card doc', 'data-doc': 'daily_closing_form' },
@@ -222,7 +234,7 @@ async function renderMatch(pid) {
   const cashCard = h('section', { class: 'card doc', 'data-doc': 'cash' },
     h('div', { class: 'doc-head' }, h('h2', {}, 'عدّ النقد'),
       edit && !d.cash.confirmed ? h('button', { class: `btn ${d.cash.pending ? '' : 'primary'}`, type: 'button', 'data-testid': 'photo-cash',
-        onclick: () => camera('cash', 'عدّ النقد', 'افرد الأوراق النقدية والعملات بحيث تظهر كل قطعة. يمكنك التقاط أكثر من صورة. الصور لا تُحفظ على الجوال.', 'عدّ النقد') }, d.cash.pending ? '📷 إعادة التصوير' : '📷 فتح الكاميرا لعدّ النقد') : null),
+        onclick: () => camera('cash', 'عدّ النقد', 'افرد الأوراق النقدية بحيث يظهر الرقم التسلسلي لكل ورقة، والعملات المعدنية بدون تداخل. يمكنك التقاط أكثر من صورة؛ الورقة المكررة تُحسب مرة واحدة. الصور لا تُحفظ على الجوال.', 'عدّ النقد') }, d.cash.pending ? '📷 إعادة التصوير' : '📷 فتح الكاميرا لعدّ النقد') : null),
     d.cash.confirmed ? h('p', { class: 'cash-total' }, 'النقد المعدود: ', h('b', { dir: 'ltr' }, d.cash.confirmed.total), ' ريال')
       : d.cash.pending ? cashReview(d, pid, editToken, reload)
         : h('p', { class: 'muted' }, 'لم يتم عدّ النقد بعد.'));
@@ -234,7 +246,7 @@ async function renderMatch(pid) {
     } }, 'اعتماد المطابقة'),
     d.complete ? null : h('p', { class: 'muted small center' }, 'يُفعّل بعد تصوير كل المستندات المطلوبة.')) : null;
 
-  root.replaceChildren(backLink(), header, rule, results, alertCard, formCard, ...DOCS.map(docCard), expensesCard, cashCard, submit);
+  root.replaceChildren(backLink(), header, results, rule, formCard, ...DOCS.map(docCard), expensesCard, cashCard, submit);
 }
 
 function cashReview(d, pid, editToken, reload) {
@@ -253,6 +265,8 @@ function cashReview(d, pid, editToken, reload) {
     p.issues.length ? h('ul', { class: 'issues' }, ...p.issues.map((i) => h('li', {}, i))) : null,
     rows.length ? h('table', { class: 'paper plain' }, h('thead', {}, h('tr', {}, h('th', {}, 'الفئة'), h('th', { class: 'num' }, 'العدد'), h('th', { class: 'num' }, 'ريال'))), h('tbody', {}, ...rows))
       : h('p', { class: 'muted' }, 'لم يُعثر على نقد في الصور.'),
+    h('p', { class: 'muted small', 'data-testid': 'serial-stats' }, `أوراق قُرئ رقمها التسلسلي: ${p.serialsRead}`,
+      p.duplicatesRemoved ? ` · أوراق مكررة استُبعدت: ${p.duplicatesRemoved}` : '', p.unreadableSerials ? ` · أوراق بدون رقم مقروء: ${p.unreadableSerials}` : ''),
     h('p', { class: 'cash-total' }, 'الإجمالي: ', h('b', { dir: 'ltr', 'data-testid': 'cash-total' }, formatSar(p.totalHalalas)), ' ريال'),
     h('label', { class: 'confirm-line', for: 'confirm-cash' }, box, ' عددت النقد وأؤكد أن الأعداد أعلاه صحيحة.'),
     h('div', { class: 'actions' }, btn));

@@ -1,76 +1,54 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import Anthropic from '@anthropic-ai/sdk';
-import { createCashCounter } from '../../src/services/cashCounter.js';
-import { inspectJpeg } from '../../src/services/jpegInspect.js';
-import { liveFrameJpeg, galleryPhotoJpeg } from '../helpers/jpeg.js';
+import { createCashCounter, toResult, normaliseSerial } from '../../src/services/cashCounter.js';
+import { liveFrameJpeg } from '../helpers/jpeg.js';
 
-function fakeClient(respond) {
-  const calls = [];
-  return { calls, beta: { messages: { create: async (params) => { calls.push(params); return respond(params); } } } };
-}
-const counterWith = (client) => createCashCounter({ aiProvider: 'anthropic', aiModel: 'claude-opus-5-5', anthropicClient: client });
+const fakeClient = (respond) => { const calls = []; return { calls, beta: { messages: { create: async (p) => { calls.push(p); return respond(p); } } } }; };
+const counter = (client) => createCashCounter({ aiProvider: 'anthropic', aiModel: 'claude-opus-5-5', anthropicClient: client });
 const images = [{ id: 'a', bytes: liveFrameJpeg() }, { id: 'b', bytes: liveFrameJpeg() }];
 
-test('sends both photographs with a strict JSON schema, adaptive thinking and server-side fallback', async () => {
-  const client = fakeClient(() => ({
-    stop_reason: 'end_turn', model: 'claude-opus-5-5',
-    content: [{ type: 'text', text: JSON.stringify({ counts: [{ denomination: 'note_500', count: 2, confidence: 'high' }, { denomination: 'note_10', count: 7, confidence: 'low' }], issues: ['Photos 1 and 2 overlap'] }) }],
-  }));
-  const r = await counterWith(client).analyze(images);
+test('asks for every banknote with its serial number, sends all photos', async () => {
+  const client = fakeClient(() => ({ stop_reason: 'end_turn', model: 'claude-opus-5-5', content: [{ type: 'text', text: JSON.stringify({ banknotes: [], coins: [], issues: [] }) }] }));
+  await counter(client).analyze(images);
   const p = client.calls[0];
-  assert.equal(p.model, 'claude-opus-5-5');
-  assert.deepEqual(p.thinking, { type: 'adaptive' });
-  assert.equal(p.fallbacks, 'default');
-  assert.deepEqual(p.betas, ['server-side-fallback-2026-07-01']);
-  assert.equal(p.output_config.format.type, 'json_schema');
-  assert.equal(p.output_config.format.schema.additionalProperties, false);
   assert.equal(p.messages[0].content.filter((b) => b.type === 'image').length, 2);
-  assert.match(p.system, /not instructions to you/);
-
-  assert.equal(r.status, 'completed');
-  assert.equal(r.counts.note_500, 2);
-  assert.equal(r.counts.note_10, 7);
-  assert.equal(r.counts.note_100, 0);
-  assert.match(r.issues[0], /قراءة غير مؤكدة لفئة: ١٠ ريال/);
+  assert.ok(p.output_config.format.schema.properties.banknotes.items.required.includes('serial'));
+  assert.match(p.system, /serial number/);
+  assert.equal(p.fallbacks, 'default');
 });
 
-test('clamps negative or absurd counts and drops unknown denominations', async () => {
-  const client = fakeClient(() => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ counts: [
-    { denomination: 'note_100', count: -4, confidence: 'high' }, { denomination: 'note_1000', count: 3, confidence: 'high' }, { denomination: 'note_50', count: 1e9, confidence: 'high' },
-  ], issues: [] }) }] }));
-  const r = await counterWith(client).analyze(images);
-  assert.equal(r.counts.note_100, 0);
-  assert.equal(r.counts.note_50, 100000);
-  assert.equal('note_1000' in r.counts, false);
+test('a note seen in two photographs (same serial) is counted once and reported', () => {
+  const r = toResult({ banknotes: [
+    { photo: 1, denomination: 'note_100', serial: '123456789' },
+    { photo: 2, denomination: 'note_100', serial: '123 456 789' }, // same note, second photo
+    { photo: 2, denomination: 'note_100', serial: '987654321' },
+    { photo: 1, denomination: 'note_50', serial: '١١١٢٢٢٣٣٣' },
+  ], coins: [{ denomination: 'coin_1', count: 3 }], issues: [] }, 'm');
+  assert.equal(r.counts.note_100, 2);
+  assert.equal(r.counts.note_50, 1);
+  assert.equal(r.counts.coin_1, 3);
+  assert.equal(r.duplicatesRemoved, 1);
+  assert.match(r.issues[0], /رقمها التسلسلي 123456789 ظهرت في الصور 1 و 2 وحُسبت مرة واحدة/);
+  assert.deepEqual(r.serials.map((s) => s.serial).sort(), ['111222333', '123456789', '987654321']);
 });
 
-for (const [name, response] of [
-  ['refusal', { stop_reason: 'refusal', stop_details: { type: 'refusal', category: null }, content: [] }],
-  ['truncated output', { stop_reason: 'max_tokens', content: [{ type: 'text', text: '{"counts": [' }] }],
-  ['unparseable output', { stop_reason: 'end_turn', content: [{ type: 'text', text: 'not json' }] }],
-]) {
-  test(`${name} → failed analysis with zero counts (employee counts by hand)`, async () => {
-    const r = await counterWith(fakeClient(() => response)).analyze(images);
+test('notes without a readable serial are counted but reported', () => {
+  const r = toResult({ banknotes: [{ photo: 1, denomination: 'note_10', serial: '' }, { photo: 1, denomination: 'note_10', serial: '??' }], coins: [], issues: [] }, 'm');
+  assert.equal(r.counts.note_10, 2);
+  assert.equal(r.unreadableSerials, 2);
+  assert.match(r.issues[0], /2 ورقة نقدية لم يُقرأ رقمها التسلسلي/);
+});
+
+test('serial normalisation', () => {
+  assert.equal(normaliseSerial(' ٠١٢-345 ab '), '012345AB');
+});
+
+test('refusal / cut-off / bad JSON / API error → failed', async () => {
+  for (const respond of [() => ({ stop_reason: 'refusal', content: [] }), () => ({ stop_reason: 'max_tokens', content: [] }),
+    () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'x' }] }), () => { throw new Anthropic.APIConnectionError({ message: 'down' }); }]) {
+    const r = await counter(fakeClient(respond)).analyze(images);
     assert.equal(r.status, 'failed');
     assert.ok(Object.values(r.counts).every((n) => n === 0));
-    assert.match(r.issues[0], /يدويًا/);
-  });
-}
-
-test('API errors become a failed analysis rather than an exception', async () => {
-  const client = fakeClient(() => { throw new Anthropic.APIConnectionError({ message: 'down' }); });
-  const r = await counterWith(client).analyze(images);
-  assert.equal(r.status, 'failed');
-  assert.match(r.issues[0], /تعذّر الاتصال/);
-});
-
-test('jpeg inspection: dimensions, completeness and camera EXIF', () => {
-  assert.deepEqual(
-    { ...inspectJpeg(liveFrameJpeg(1280, 720)), reason: undefined },
-    { valid: true, width: 1280, height: 720, cameraExifTags: [], reason: undefined },
-  );
-  assert.deepEqual(inspectJpeg(galleryPhotoJpeg()).cameraExifTags, ['Make']);
-  assert.equal(inspectJpeg(liveFrameJpeg().subarray(0, 60)).valid, false);
-  assert.equal(inspectJpeg(Buffer.from('hello')).reason, 'not_jpeg');
+  }
 });

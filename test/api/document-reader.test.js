@@ -8,24 +8,24 @@ const fakeClient = (respond) => { const calls = []; return { calls, beta: { mess
 const reader = (client) => createDocumentReader({ aiProvider: 'anthropic', aiModel: 'claude-opus-5-5', anthropicClient: client });
 const BRANCHES = [{ id: 'najran', name: 'Najran', name_ar: 'نجران' }, { id: 'tabuk', name: 'Tabuk', name_ar: 'تبوك' }];
 
-test('closing form: photo sent as an image, branch limited to known branches, header fields returned', async () => {
+test('closing form: photo sent as an image, branch read as written (known names only as hints)', async () => {
   const client = fakeClient(() => ({ stop_reason: 'end_turn', model: 'claude-opus-5-5', content: [{ type: 'text', text: JSON.stringify({
     values: [{ field: 'gross_sales', amount: '١٠٦٩٠', confidence: 'high' }, { field: 'cash_sales', amount: '6797', confidence: 'low' }],
-    issues: [], branch: 'najran', date: '2026-11-18', day_name: 'الأربعاء', notes: '' }) }] }));
+    issues: [], branch: 'نجران', date: '2026-11-18', day_name: 'الأربعاء', notes: '' }) }] }));
   const r = await reader(client).read({ kind: 'daily_closing_form', bytes: liveFrameJpeg(), branches: BRANCHES });
   const p = client.calls[0];
   assert.equal(p.messages[0].content[0].type, 'image');
-  assert.deepEqual(p.output_config.format.schema.properties.branch.enum, ['najran', 'tabuk', 'unknown']);
+  assert.deepEqual(p.output_config.format.schema.properties.branch, { type: 'string' }, 'any branch name, not a fixed list');
   assert.ok(p.output_config.format.schema.required.includes('date'));
-  assert.match(p.messages[0].content[1].text, /najran: نجران \/ Najran/);
+  assert.match(p.messages[0].content[1].text, /- نجران\n- تبوك/);
   assert.equal(p.fallbacks, 'default');
   assert.equal(r.fields.gross_sales, 1069000);
   assert.deepEqual(r.lowConfidence, ['cash_sales']);
-  assert.deepEqual(r.extras, { branch: 'najran', date: '2026-11-18', day_name: 'الأربعاء', notes: null });
+  assert.deepEqual(r.extras, { branch: 'نجران', date: '2026-11-18', day_name: 'الأربعاء', notes: null });
 });
 
-test('unknown branch / bad date become null', () => {
-  const r = toResult('daily_closing_form', { values: [], issues: [], branch: 'unknown', date: '18/11/2026', day_name: '', notes: '' }, 'm');
+test('empty branch / bad date become null', () => {
+  const r = toResult('daily_closing_form', { values: [], issues: [], branch: '', date: '18/11/2026', day_name: '', notes: '' }, 'm');
   assert.equal(r.extras.branch, null);
   assert.equal(r.extras.date, null);
 });

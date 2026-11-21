@@ -10,8 +10,8 @@ let srv;
 before(async () => { srv = await startTestServer({ documentReader: reader, cashCounter: counter }); });
 after(() => srv.close());
 
-const form = (date, branch = 'tabuk', fields = TABUK_FORM.fields) => ({ fields, extras: { ...TABUK_FORM.extras, date, branch } });
-async function newMatch(date, branch = 'tabuk', fields) {
+const form = (date, branch = 'تبوك', fields = TABUK_FORM.fields) => ({ fields, extras: { ...TABUK_FORM.extras, date, branch } });
+async function newMatch(date, branch = 'تبوك', fields) {
   reader.next('daily_closing_form', form(date, branch, fields));
   const r = await photograph(srv, 'daily_closing_form');
   assert.equal(r.status, 201, JSON.stringify(r.data));
@@ -28,7 +28,7 @@ test('photographing the closing form creates the reconciliation: branch and date
   assert.equal(m.detail.canEdit, true);
   assert.equal(m.detail.documents.daily_closing_form.fields.net_sales, 456700);
   // The reader was given the list of active branches to pick from.
-  assert.deepEqual(reader.calls.at(-1).branches.map((b) => b.id), ['najran', 'tabuk']);
+  assert.deepEqual(reader.calls.at(-1).branches.map((b) => b.name_ar).sort(), ['تبوك', 'نجران']);
 
   // No public list: older reconciliations open only through their own link / QR.
   assert.equal((await srv.call('GET', '/api/matches')).status, 404);
@@ -53,7 +53,7 @@ test('one reconciliation per branch per day', async () => {
   assert.equal(other.data.error.code, 'MATCH_EXISTS');
   assert.equal(other.data.error.details.number, m.number);
   // The same phone re-photographing replaces the form.
-  reader.next('daily_closing_form', form('2026-11-17', 'tabuk', { ...TABUK_FORM.fields, cash_outflow: 0 }));
+  reader.next('daily_closing_form', form('2026-11-17', 'تبوك', { ...TABUK_FORM.fields, cash_outflow: 0 }));
   const again = await photograph(srv, 'daily_closing_form', { publicId: m.publicId, editToken: m.editToken });
   assert.equal(again.status, 200);
   assert.equal(again.data.detail.documents.daily_closing_form.fields.cash_outflow, 0);
@@ -89,7 +89,7 @@ test('only the device that started a reconciliation can add photographs', async 
 
 test('full day: every document photographed → matched → submitted; QR and link work', async () => {
   // Yesterday (for the deposit check): closing cash 4750.
-  await newMatch('2026-11-12', 'tabuk', { ...TABUK_FORM.fields, closing_cash_balance: 475000 });
+  await newMatch('2026-11-12', 'تبوك', { ...TABUK_FORM.fields, closing_cash_balance: 475000 });
   const m = await newMatch('2026-11-13');
   const auth = { publicId: m.publicId, editToken: m.editToken };
 
@@ -162,4 +162,58 @@ test('audit trail is hash-chained', async () => {
 test('messages are Arabic', async () => {
   const r = await srv.call('GET', '/api/matches/nope');
   assert.equal(r.data.error.message, 'المطابقة غير موجودة.');
+});
+
+test('a branch is created from the name written on the form; spelling variants are the same branch', async () => {
+  const a = await newMatch('2026-11-05', 'فرع الرياض - العليا');
+  assert.equal(a.detail.match.branchName, 'فرع الرياض - العليا');
+  reader.next('daily_closing_form', form('2026-11-05', 'الرياض العليا'));
+  const b = await photograph(srv, 'daily_closing_form');
+  assert.equal(b.data.error.code, 'MATCH_EXISTS', 'same branch, same day');
+  const c = await newMatch('2026-11-06', 'رياض العليا');
+  assert.equal(c.detail.match.branchName, 'فرع الرياض - العليا', 'reuses the existing branch');
+  // The new name is offered to the reader as a spelling hint next time.
+  reader.next('daily_closing_form', form('2026-11-07', 'جدة'));
+  await photograph(srv, 'daily_closing_form');
+  assert.ok(reader.calls.at(-1).branches.some((x) => x.name_ar === 'فرع الرياض - العليا'));
+});
+
+test('the same banknotes in another branch\'s cash count → red "تكرار أوراق نقدية"', async () => {
+  const serials = [{ serial: 'AB123456', denomination: 'note_500' }, { serial: 'CD654321', denomination: 'note_100' }];
+  counter.next = { status: 'completed', model: 'm', counts: { note_500: 1, note_100: 1, note_50: 1, note_10: 2 }, issues: [], serials };
+  const other = await newMatch('2026-11-20', 'نجران');
+  let d = (await photograph(srv, 'cash', { publicId: other.publicId, editToken: other.editToken })).data.detail;
+  await srv.call('POST', `/api/matches/${other.publicId}/cash/confirm`, { editToken: other.editToken, json: { readingId: d.cash.pending.readingId, confirmed: true } });
+
+  const mine = await newMatch('2026-11-21');
+  d = (await photograph(srv, 'cash', { publicId: mine.publicId, editToken: mine.editToken })).data.detail;
+  d = (await srv.call('POST', `/api/matches/${mine.publicId}/cash/confirm`, { editToken: mine.editToken, json: { readingId: d.cash.pending.readingId, confirmed: true } })).data;
+  const clash = d.checks.find((c) => c.id === 'cash_serials');
+  assert.equal(clash.ok, false);
+  assert.match(clash.text, /تكرار أوراق نقدية: 2 ورقة .* فرع نجران \(مطابقة \d+ بتاريخ 2026-11-20\)/);
+  assert.match(clash.text, /AB123456/);
+  counter.next = null;
+});
+
+test('the notes report is stored when approved and shown as approved through the link', async () => {
+  const m = await newMatch('2026-11-01');
+  const a = { publicId: m.publicId, editToken: m.editToken };
+  reader.next('z_report', TABUK_Z); await photograph(srv, 'z_report', a);
+  reader.next('bank_settlement', TABUK_BANK); await photograph(srv, 'bank_settlement', a);
+  reader.next('deposit_receipt', { fields: { amount: 475000 }, extras: {} }); await photograph(srv, 'deposit_receipt', a);
+  reader.next('expense_invoice', { fields: { amount: 2000 }, extras: {} }); await photograph(srv, 'expense_invoice', a);
+  const c = (await photograph(srv, 'cash', a)).data.detail;
+  await srv.call('POST', `/api/matches/${m.publicId}/cash/confirm`, { editToken: m.editToken, json: { readingId: c.cash.pending.readingId, confirmed: true } });
+  const before = (await srv.call('GET', `/api/matches/${m.publicId}`)).data;
+  assert.equal(before.report.frozen, false);
+  await srv.call('POST', `/api/matches/${m.publicId}/submit`, { editToken: m.editToken });
+
+  const viewer = (await srv.call('GET', `/api/matches/${m.publicId}`)).data; // via the link / QR, no token
+  assert.equal(viewer.report.frozen, true);
+  assert.ok(viewer.report.generatedAt);
+  assert.equal(viewer.report.formNotes, 'إيداع كاش الصندوق 4750 ريال');
+  assert.deepEqual(viewer.checks, before.checks);
+  // Later changes elsewhere (e.g. yesterday's reconciliation appearing) do not change the approved report.
+  await newMatch('2026-10-31', 'تبوك', { ...TABUK_FORM.fields, closing_cash_balance: 100000 });
+  assert.deepEqual((await srv.call('GET', `/api/matches/${m.publicId}`)).data.warnings, viewer.warnings);
 });

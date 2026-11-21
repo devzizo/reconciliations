@@ -20,11 +20,9 @@ Cloudflare D1 database `reconciliations-db` (location hint: Eastern Europe, the 
 - Cash photographs and documents are stored in D1 as chunks (`file_chunks`), because R2 is not enabled
   on the account. The D1 free plan caps a database at 500 MB; once R2 is enabled, move file storage
   there (`src/fileStore.js` is the single place to change).
-- There are no user accounts. Branches (the AI matches the branch written on the form against this list):
-
-```bash
-node scripts/create-branch.mjs --id jeddah --name Jeddah --name-ar جدة
-```
+- There are no user accounts and no branch setup: the branch is taken from the name written on the form.
+- The blank printable form is `public/daily-closing-form.pdf` (rebuild with `node scripts/build-form.mjs`
+  after editing `forms/daily-closing-form.html`).
 
 Deploy changes:
 
